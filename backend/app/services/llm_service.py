@@ -76,9 +76,9 @@ async def validate_api_key():
     try:
         client = get_client()
         await client.chat.completions.create(
-            model="gpt-5-nano",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": "test"}],
-            max_completion_tokens=5
+            max_tokens=5
         )
         logger.info("OpenAI API key validated successfully")
     except Exception as e:
