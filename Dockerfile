@@ -35,6 +35,12 @@ COPY --from=frontend-builder /frontend/dist ./frontend/dist
 
 EXPOSE 8000
 
-# Railway will override this CMD with the startCommand from railway.json
-# which uses $PORT environment variable
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Multi-stage startup: migrations (critical) -> seed (optional) -> server
+CMD ["sh", "-c", "\
+    echo '=== Starting deployment ===' && \
+    echo 'Waiting for database...' && sleep 3 && \
+    echo 'Running migrations...' && alembic upgrade head && \
+    echo 'Migrations complete. Running seed...' && \
+    (python -m app.db.seed || echo 'WARNING: Seed failed or skipped') && \
+    echo 'Starting application server...' && \
+    uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
