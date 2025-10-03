@@ -54,16 +54,26 @@ export default function App() {
         </div>
       </div>}
     >
-      <div className="min-h-screen bg-zinc-950 py-8 px-4">
-        <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold text-white mb-8">
-            HR Employee Query System
-          </h1>
+      <div className="min-h-screen bg-zinc-950 flex flex-col items-center">
+        <div className="w-full max-w-3xl px-4 py-8">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-white mb-2">
+              HR Employee Query System
+            </h1>
+            <p className="text-zinc-400 text-sm">
+              Ask questions about employees in natural language
+            </p>
+          </div>
 
-          <QueryInterface onSubmit={handleQuerySubmit} isLoading={isLoading} onTimeout={handleTimeout} />
+          <QueryInterface
+            onSubmit={handleQuerySubmit}
+            isLoading={isLoading}
+            onTimeout={handleTimeout}
+            error={error}
+            results={results}
+          />
 
           <div className="mt-8">
-            {error && <ErrorDisplay error={error} />}
             {isLoading && <LoadingSpinner />}
             {!isLoading && !error && results.length > 0 && (
               <>
