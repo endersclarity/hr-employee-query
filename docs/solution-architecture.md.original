@@ -1,0 +1,1112 @@
+# Solution Architecture: Natural Language HR Employee Records Query Application
+
+**Author:** Kaelen
+**Architect:** Winston (BMad Architect Agent)
+**Date:** 2025-10-01
+**Project Level:** Level 2 (Small Complete System)
+**Architecture Style:** Modular Monolith
+**Repository Strategy:** Monorepo
+
+---
+
+## Executive Summary
+
+This document defines the technical architecture for a full-stack web application that enables natural language querying of HR employee records. The system leverages OpenAI's LLM to convert natural language to SQL, executes queries securely, and evaluates results using the Ragas framework. Built as a job interview demonstration, the architecture emphasizes production-quality patterns, security, and systematic methodology while maintaining appropriate scope for a Level 2 project.
+
+**Related Documentation:**
+- Requirements: `docs/project-assignment.md`, `docs/PRD.md`
+- Research: `docs/Research/Comprehensive Research Report_ Ragas Evaluation Fr.md`
+- Planning: `docs/brainstorming-session-results-2025-10-01.md`, `docs/epic-stories.md`
+- Classification: `docs/project-workflow-analysis.md`
+
+**Key Architectural Decisions:**
+- **Modular Monolith:** Single FastAPI application with logical module boundaries
+- **Monorepo:** Frontend and backend in a single repository
+- **Railway Deployment:** Unified platform for frontend, backend, and database
+- **Docker-First Development:** Local development via docker-compose
+
+**Target Audience:** This document is written for beginner-level full-stack developers, with detailed explanations and rationale for each decision.
+
+---
+
+## Table of Contents
+
+1. [Technology Stack & Decisions](#technology-stack--decisions)
+2. [System Architecture Overview](#system-architecture-overview)
+3. [Component Architecture](#component-architecture)
+4. [Data Architecture](#data-architecture)
+5. [API Design](#api-design)
+6. [Security Architecture](#security-architecture)
+7. [Evaluation Framework Integration](#evaluation-framework-integration)
+8. [Deployment Architecture](#deployment-architecture)
+9. [Development Workflow](#development-workflow)
+10. [Proposed Source Tree](#proposed-source-tree)
+11. [Architecture Decision Records](#architecture-decision-records)
+12. [Implementation Guidance](#implementation-guidance)
+
+---
+
+## Technology Stack & Decisions
+
+| Category | Technology | Version | Rationale |
+|----------|-----------|---------|-----------|
+| **Frontend Framework** | React | 18.3.1 | Industry-standard UI library, excellent ecosystem, component-based architecture suitable for simple interfaces |
+| **Frontend Styling** | Tailwind CSS | 3.4.1 | Utility-first CSS framework, rapid development, no custom CSS needed, beginner-friendly |
+| **Frontend Build Tool** | Vite | 5.0.0 | Modern build tool, fast HMR (Hot Module Replacement), better DX than Create React App |
+| **Frontend HTTP Client** | Axios | 1.6.5 | Promise-based HTTP client, better error handling than fetch, interceptor support for logging |
+| **Backend Framework** | FastAPI | 0.109.0 | Modern Python framework, automatic API documentation (OpenAPI), async support, type safety |
+| **Backend Language** | Python | 3.11+ | Required for Ragas library, excellent LLM ecosystem, FastAPI support, beginner-friendly |
+| **Database** | PostgreSQL | 15+ | Production-grade RDBMS, Railway managed service, better than SQLite for demo credibility |
+| **Database ORM** | SQLAlchemy | 2.0.25 | Industry-standard Python ORM, type-safe queries, migration support via Alembic |
+| **Database Migrations** | Alembic | 1.13.1 | Database migration tool for SQLAlchemy, version control for schema changes |
+| **LLM Provider** | OpenAI | GPT-4o-mini | Cost-effective model, reliable NL→SQL conversion, structured output support |
+| **LLM SDK** | OpenAI Python | 1.10.0 | Official SDK, async support, streaming capabilities, well-documented |
+| **Evaluation Framework** | Ragas | 0.1.0+ | Purpose-built for RAG/LLM evaluation, Faithfulness/Relevance/Precision metrics |
+| **Validation** | Pydantic | 2.5.3 | Data validation, settings management, integrates with FastAPI, type safety |
+| **SQL Validation** | sqlparse | 0.4.4 | SQL parsing and validation, detect malicious queries, whitelist SELECT statements |
+| **Logging** | structlog | 24.1.0 | Structured logging, JSON output, better than print() for production patterns |
+| **Environment Config** | python-dotenv | 1.0.0 | Load environment variables from .env files, keeps secrets out of code |
+| **CORS** | fastapi-cors | - | Built-in FastAPI CORS middleware (frontend-backend communication) |
+| **Containerization** | Docker | 24.0+ | Container platform for consistent environments, required by assignment |
+| **Container Orchestration** | Docker Compose | 2.23+ | Multi-container orchestration for local development (frontend + backend + DB) |
+| **Deployment Platform** | Railway | - | PaaS with PostgreSQL, Docker support, simple deployment, good for demos |
+| **HTTP Server (Production)** | Uvicorn | 0.27.0 | ASGI server for FastAPI, production-ready, handles async requests |
+
+**Total Dependencies:** ~15 production packages (lean stack, no bloat)
+
+---
+
+## System Architecture Overview
+
+### High-Level Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         User's Browser                          │
+│                    (React + Tailwind UI)                        │
+└────────────────┬────────────────────────────────────────────────┘
+                 │
+                 │ HTTPS (Railway Domain)
+                 │
+┌────────────────▼────────────────────────────────────────────────┐
+│                      FastAPI Application                        │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Static File Serving (React Build)                       │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  REST API Endpoints                                      │  │
+│  │  POST /api/query                                         │  │
+│  │  GET /api/health                                         │  │
+│  └──────────────┬───────────────────────────────────────────┘  │
+│                 │                                                │
+│  ┌──────────────▼───────────────────────────────────────────┐  │
+│  │  Business Logic Layer                                    │  │
+│  │  ┌────────────────┐  ┌──────────────┐  ┌─────────────┐  │  │
+│  │  │ Query Service  │  │ Ragas Service│  │ Auth (TBD)  │  │  │
+│  │  └────────┬───────┘  └──────┬───────┘  └─────────────┘  │  │
+│  └───────────┼──────────────────┼──────────────────────────┘  │
+│              │                  │                              │
+│  ┌───────────▼────────┐  ┌──────▼──────────────────────────┐  │
+│  │  LLM Integration   │  │  Evaluation Engine              │  │
+│  │  (OpenAI Client)   │  │  (Ragas Framework)              │  │
+│  └───────────┬────────┘  └─────────────────────────────────┘  │
+│              │                                                  │
+│  ┌───────────▼──────────────────────────────────────────────┐  │
+│  │  Security & Validation Layer                             │  │
+│  │  - SQL Parser (sqlparse)                                 │  │
+│  │  - Query Validator (whitelist SELECT)                   │  │
+│  │  - Input Sanitization                                    │  │
+│  └───────────┬──────────────────────────────────────────────┘  │
+│              │                                                  │
+│  ┌───────────▼──────────────────────────────────────────────┐  │
+│  │  Data Access Layer                                       │  │
+│  │  (SQLAlchemy ORM)                                        │  │
+│  └───────────┬──────────────────────────────────────────────┘  │
+└──────────────┼──────────────────────────────────────────────────┘
+               │
+               │ TCP (Read-Only User)
+               │
+┌──────────────▼──────────────────────────────────────────────────┐
+│              PostgreSQL Database (Railway)                      │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  employees table                                         │  │
+│  │  query_logs table (optional)                            │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key Flows:**
+
+1. **Query Flow:** User Input → React → API → LLM (NL→SQL) → Validator → DB → Results → React
+2. **Evaluation Flow:** Results + Query → Ragas → Metrics → React Display
+3. **Static Serving:** Browser Request → FastAPI Static Handler → React Build Files
+
+---
+
+## Component Architecture
+
+### Frontend Components (React + Tailwind)
+
+**Component Hierarchy:**
+```
+App
+├── QueryInterface
+│   ├── QueryInput (textarea + submit button)
+│   ├── LoadingSpinner
+│   └── ErrorDisplay
+├── ResultsTable (data table with columns)
+├── RagasScoreDisplay
+│   ├── ScoreBadge (Faithfulness)
+│   ├── ScoreBadge (Answer Relevance)
+│   └── ScoreBadge (Context Precision)
+└── GeneratedSQLDisplay (optional, collapsible)
+```
+
+**State Management:** React useState (no Redux needed for simple app)
+- `query`: string (user input)
+- `results`: array (query results)
+- `ragasScores`: object (evaluation metrics)
+- `loading`: boolean
+- `error`: string | null
+- `generatedSQL`: string (for transparency)
+
+**Why Simple State?**
+For a single-page app with minimal state, React's built-in useState is sufficient. Redux/Zustand would be overkill and add unnecessary complexity.
+
+---
+
+### Backend Modules (FastAPI)
+
+**Module Structure:**
+```
+backend/
+├── app/
+│   ├── main.py (FastAPI app initialization, static serving)
+│   ├── api/ (API routes)
+│   │   ├── __init__.py
+│   │   ├── routes.py (POST /api/query, GET /api/health)
+│   │   └── models.py (Pydantic request/response models)
+│   ├── services/ (Business logic)
+│   │   ├── __init__.py
+│   │   ├── query_service.py (orchestrates NL→SQL→Results flow)
+│   │   ├── llm_service.py (OpenAI integration)
+│   │   ├── ragas_service.py (evaluation metrics)
+│   │   └── validation_service.py (SQL validation, security)
+│   ├── db/ (Database layer)
+│   │   ├── __init__.py
+│   │   ├── models.py (SQLAlchemy ORM models)
+│   │   ├── session.py (database connection)
+│   │   └── seed.py (mock data generation)
+│   ├── config.py (settings via Pydantic BaseSettings)
+│   └── utils/
+│       ├── __init__.py
+│       └── logger.py (structured logging setup)
+```
+
+**Service Responsibilities:**
+
+1. **query_service.py** - Main orchestrator
+   - Receives natural language query
+   - Calls llm_service for SQL generation
+   - Calls validation_service for security check
+   - Executes SQL via db layer
+   - Calls ragas_service for evaluation
+   - Returns combined response
+
+2. **llm_service.py** - LLM integration
+   - Schema-aware system prompt
+   - Few-shot examples for reliability
+   - Async OpenAI API calls
+   - Error handling (rate limits, API failures)
+
+3. **ragas_service.py** - Evaluation
+   - Calculate Faithfulness (schema consistency)
+   - Calculate Answer Relevance (intent alignment)
+   - Calculate Context Precision (field selection)
+   - Return scores 0.6-1.0 scale
+
+4. **validation_service.py** - Security layer
+   - Parse SQL with sqlparse
+   - Whitelist SELECT only (block DELETE, DROP, UPDATE, INSERT)
+   - Detect SQL injection patterns
+   - Raise exceptions for malicious queries
+
+---
+
+## Data Architecture
+
+### Database Schema
+
+**employees table:**
+```sql
+CREATE TABLE employees (
+    employee_id SERIAL PRIMARY KEY,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    department VARCHAR(100) NOT NULL,
+    role VARCHAR(100) NOT NULL,
+    employment_status VARCHAR(50) NOT NULL,  -- 'Active', 'Terminated', 'On Leave'
+    hire_date DATE NOT NULL,
+    leave_type VARCHAR(50),  -- nullable, 'Parental Leave', 'Medical Leave', etc.
+    salary_local DECIMAL(12, 2) NOT NULL,
+    salary_usd DECIMAL(12, 2) NOT NULL,
+    manager_name VARCHAR(200),  -- nullable
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_department ON employees(department);
+CREATE INDEX idx_hire_date ON employees(hire_date);
+CREATE INDEX idx_employment_status ON employees(employment_status);
+CREATE INDEX idx_manager_name ON employees(manager_name);
+```
+
+**Indexes Rationale:**
+Indexes on `department`, `hire_date`, `employment_status`, and `manager_name` optimize the 4 mandatory query types from the requirements.
+
+**query_logs table (optional):**
+```sql
+CREATE TABLE query_logs (
+    id SERIAL PRIMARY KEY,
+    natural_language_query TEXT NOT NULL,
+    generated_sql TEXT NOT NULL,
+    faithfulness_score DECIMAL(3, 2),
+    answer_relevance_score DECIMAL(3, 2),
+    context_precision_score DECIMAL(3, 2),
+    result_count INTEGER,
+    execution_time_ms INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Mock Data Design (Critical for Demo):**
+
+Must include employees that satisfy all 4 example queries:
+- **"Last 6 months hires":** At least 5 employees with `hire_date` within last 6 months
+- **"Engineering salary > 120K":** At least 3 employees with `department='Engineering'` AND `salary_usd > 120000`
+- **"Parental leave":** At least 2 employees with `leave_type='Parental Leave'`
+- **"Managed by John Doe":** At least 4 employees with `manager_name='John Doe'`
+
+**Seed Data Script:** `backend/app/db/seed.py` generates ~50 diverse employee records covering all scenarios.
+
+---
+
+## API Design
+
+### REST API Endpoints
+
+**Base URL:** `https://your-app.railway.app/api`
+
+#### POST /api/query
+
+**Purpose:** Execute natural language query and return results with Ragas scores
+
+**Request:**
+```json
+{
+  "query": "Show me employees in Engineering with salary greater than 120K"
+}
+```
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "query": "Show me employees in Engineering with salary greater than 120K",
+  "generated_sql": "SELECT employee_id, first_name, last_name, department, salary_usd FROM employees WHERE department = 'Engineering' AND salary_usd > 120000",
+  "results": [
+    {
+      "employee_id": 42,
+      "first_name": "Alice",
+      "last_name": "Johnson",
+      "department": "Engineering",
+      "salary_usd": 135000.00
+    },
+    {
+      "employee_id": 73,
+      "first_name": "Bob",
+      "last_name": "Smith",
+      "department": "Engineering",
+      "salary_usd": 142000.00
+    }
+  ],
+  "ragas_scores": {
+    "faithfulness": 0.92,
+    "answer_relevance": 0.88,
+    "context_precision": 0.85
+  },
+  "result_count": 2,
+  "execution_time_ms": 1243
+}
+```
+
+**Response (Validation Error - 400):**
+```json
+{
+  "success": false,
+  "error": "Query validation failed: Only SELECT queries are permitted",
+  "error_type": "VALIDATION_ERROR"
+}
+```
+
+**Response (LLM Error - 500):**
+```json
+{
+  "success": false,
+  "error": "Failed to generate SQL from natural language query",
+  "error_type": "LLM_ERROR"
+}
+```
+
+#### GET /api/health
+
+**Purpose:** Health check endpoint for monitoring
+
+**Response (200):**
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "timestamp": "2025-10-01T14:30:00Z"
+}
+```
+
+---
+
+## Security Architecture
+
+### Multi-Layered Security Approach
+
+**Layer 1: Database-Level Permissions**
+- Create read-only PostgreSQL user: `query_app_readonly`
+- Grant only SELECT permissions on `employees` table
+- No INSERT, UPDATE, DELETE, DROP, ALTER privileges
+- Even if SQL injection succeeds, damage is limited
+
+**SQL Setup:**
+```sql
+CREATE USER query_app_readonly WITH PASSWORD 'secure_random_password';
+GRANT CONNECT ON DATABASE hr_db TO query_app_readonly;
+GRANT SELECT ON employees TO query_app_readonly;
+REVOKE ALL ON employees FROM query_app_readonly;
+GRANT SELECT ON employees TO query_app_readonly;
+```
+
+**Layer 2: Prompt Engineering Safeguards**
+
+System prompt explicitly constrains LLM behavior:
+```python
+system_prompt = """You are a SQL query generator for an HR employee database.
+
+CRITICAL RULES:
+1. Generate ONLY SELECT statements
+2. Never generate DELETE, DROP, UPDATE, INSERT, or ALTER statements
+3. Only query the 'employees' table
+4. Use these columns only: employee_id, first_name, last_name, department, role, employment_status, hire_date, leave_type, salary_local, salary_usd, manager_name
+
+If the user's request cannot be fulfilled with a SELECT query, respond with: "INVALID_REQUEST"
+
+Schema:
+{schema_definition}
+
+Examples:
+{few_shot_examples}
+"""
+```
+
+**Layer 3: Input Sanitization**
+
+```python
+def sanitize_input(query: str) -> str:
+    """Remove potentially malicious characters before LLM processing."""
+    # Remove SQL comment indicators
+    query = query.replace('--', '').replace('/*', '').replace('*/', '')
+    # Remove semicolons (prevent multi-statement injection)
+    query = query.replace(';', '')
+    # Limit length
+    if len(query) > 500:
+        raise ValueError("Query too long (max 500 characters)")
+    return query.strip()
+```
+
+**Layer 4: SQL Query Validation**
+
+```python
+import sqlparse
+from sqlparse.sql import Statement
+from sqlparse.tokens import Keyword, DML
+
+def validate_sql(sql: str) -> bool:
+    """Validate that SQL is a safe SELECT query."""
+    # Parse SQL
+    parsed = sqlparse.parse(sql)
+    if not parsed:
+        raise ValueError("Invalid SQL syntax")
+
+    stmt: Statement = parsed[0]
+
+    # Check if it's a SELECT statement
+    if stmt.get_type() != 'SELECT':
+        raise ValueError("Only SELECT queries allowed")
+
+    # Check for dangerous keywords
+    dangerous_keywords = ['DELETE', 'DROP', 'UPDATE', 'INSERT', 'ALTER', 'CREATE', 'TRUNCATE']
+    sql_upper = sql.upper()
+    for keyword in dangerous_keywords:
+        if keyword in sql_upper:
+            raise ValueError(f"Dangerous keyword detected: {keyword}")
+
+    # Check that only 'employees' table is referenced
+    if 'employees' not in sql.lower():
+        raise ValueError("Only 'employees' table is permitted")
+
+    return True
+```
+
+**Layer 5: Rate Limiting (Future Enhancement)**
+
+Not implemented in MVP, but recommended for production:
+- Limit to 10 queries per minute per IP
+- Use Redis or in-memory counter
+- Prevents abuse and API cost runaway
+
+---
+
+## Evaluation Framework Integration
+
+### Ragas Implementation
+
+**What is Ragas?**
+Ragas (Retrieval Augmented Generation Assessment) is a framework for evaluating LLM outputs. We use it to assess the quality of our NL→SQL system.
+
+**Three Metrics:**
+
+1. **Faithfulness (0.6-1.0 scale)**
+   - *Question:* Is the SQL query faithful to the database schema?
+   - *Checks:* Correct table name, valid columns, proper data types
+   - *Target Score:* 0.9+ (Excellent)
+
+2. **Answer Relevance (0.6-1.0 scale)**
+   - *Question:* Do the results align with the user's intent?
+   - *Checks:* Correct filters applied, appropriate columns returned
+   - *Target Score:* 0.8+ (Good)
+
+3. **Context Precision (0.6-1.0 scale)**
+   - *Question:* Are only relevant fields included in the response?
+   - *Checks:* No unnecessary columns, focused result set
+   - *Target Score:* 0.8+ (Good)
+
+**Integration Code:**
+
+```python
+from ragas import evaluate
+from ragas.metrics import faithfulness, answer_relevance, context_precision
+
+async def evaluate_query_results(
+    query: str,
+    generated_sql: str,
+    results: list,
+    schema: dict
+) -> dict:
+    """Calculate Ragas scores for query results."""
+
+    # Prepare evaluation dataset
+    eval_data = {
+        'question': query,
+        'answer': generated_sql,
+        'contexts': [schema],  # Database schema as context
+        'ground_truth': results  # Actual DB results
+    }
+
+    # Run Ragas evaluation
+    scores = evaluate(
+        dataset=[eval_data],
+        metrics=[faithfulness, answer_relevance, context_precision]
+    )
+
+    return {
+        'faithfulness': round(scores['faithfulness'][0], 2),
+        'answer_relevance': round(scores['answer_relevance'][0], 2),
+        'context_precision': round(scores['context_precision'][0], 2)
+    }
+```
+
+**Score Interpretation (for UI display):**
+
+```python
+def get_score_color(score: float) -> str:
+    """Return color code for score badge."""
+    if score >= 0.9:
+        return 'green'  # Excellent
+    elif score >= 0.8:
+        return 'yellow'  # Good
+    elif score >= 0.7:
+        return 'orange'  # Acceptable
+    else:
+        return 'red'  # Poor - needs improvement
+```
+
+---
+
+## Deployment Architecture
+
+### Railway Deployment Strategy
+
+**Why Railway?**
+- ✅ Built-in PostgreSQL (no separate DB management)
+- ✅ Docker support (can deploy FastAPI container)
+- ✅ Simple environment variable management
+- ✅ GitHub integration for CI/CD
+- ✅ Affordable for demos
+- ✅ Single platform (simpler than Vercel + Railway)
+
+**Deployment Components:**
+
+```
+Railway Project: hr-query-app
+├── Service 1: FastAPI Backend
+│   ├── Dockerfile: backend/Dockerfile
+│   ├── Environment Variables:
+│   │   - OPENAI_API_KEY (secret)
+│   │   - DATABASE_URL (auto-provided by Railway)
+│   │   - PYTHON_ENV=production
+│   └── Exposed Port: 8000
+│
+└── Service 2: PostgreSQL Database
+    ├── Provisioned by Railway
+    ├── Automatic DATABASE_URL injection
+    └── Backups enabled
+```
+
+**FastAPI serves React build:**
+
+```python
+# backend/app/main.py
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+app = FastAPI()
+
+# API routes
+app.include_router(api_router, prefix="/api")
+
+# Serve React static files
+app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets")
+
+@app.get("/{full_path:path}")
+async def serve_react(full_path: str):
+    """Serve React SPA for all non-API routes."""
+    return FileResponse("frontend/dist/index.html")
+```
+
+**Environment Variables (Railway):**
+
+```bash
+# Set in Railway dashboard
+OPENAI_API_KEY=sk-proj-xxxxx
+DATABASE_URL=postgresql://user:pass@host:5432/db  # Auto-provided
+PYTHON_ENV=production
+ALLOWED_ORIGINS=https://hr-query-app.railway.app
+```
+
+**Build Process:**
+
+```dockerfile
+# backend/Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy backend code
+COPY ./backend/app ./app
+
+# Copy frontend build (created in CI/CD before Docker build)
+COPY ./frontend/dist ./frontend/dist
+
+# Run migrations on startup (via startup script)
+COPY ./scripts/start.sh .
+RUN chmod +x start.sh
+
+EXPOSE 8000
+
+CMD ["./start.sh"]
+```
+
+**Startup Script:**
+
+```bash
+#!/bin/bash
+# scripts/start.sh
+
+# Run database migrations
+alembic upgrade head
+
+# Seed database with mock data (if empty)
+python -m app.db.seed
+
+# Start Uvicorn server
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+---
+
+## Development Workflow
+
+### Local Development with Docker Compose
+
+**docker-compose.yml:**
+
+```yaml
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: hr_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: localdevpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.dev
+    environment:
+      DATABASE_URL: postgresql://postgres:localdevpassword@db:5432/hr_db
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PYTHON_ENV: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_API_URL: http://localhost:8000/api
+    command: npm run dev -- --host
+
+volumes:
+  postgres_data:
+```
+
+**Development Commands:**
+
+```bash
+# Start all services
+docker-compose up
+
+# Access services:
+# - Frontend: http://localhost:5173
+# - Backend API: http://localhost:8000/api
+# - Backend Docs: http://localhost:8000/docs (FastAPI auto-generated)
+# - Database: localhost:5432
+
+# Stop services
+docker-compose down
+
+# Reset database
+docker-compose down -v && docker-compose up
+```
+
+**Why Docker Compose for Local Dev?**
+- ✅ Consistent environment across team members
+- ✅ No "works on my machine" issues
+- ✅ PostgreSQL without manual installation
+- ✅ Required by assignment deliverables
+
+---
+
+## Proposed Source Tree
+
+```
+hr-nl-query-app/
+├── README.md                      # Setup, deployment, usage instructions
+├── docker-compose.yml             # Local development orchestration
+├── .gitignore                     # Git ignore rules
+├── .env.example                   # Example environment variables
+│
+├── docs/                          # All documentation
+│   ├── project-assignment.md
+│   ├── brainstorming-session-results-2025-10-01.md
+│   ├── PRD.md
+│   ├── epic-stories.md
+│   ├── solution-architecture.md   # This document
+│   ├── tech-spec-epic-1.md        # To be generated
+│   ├── tech-spec-epic-2.md        # To be generated
+│   └── project-report.md          # Final deliverable
+│
+├── frontend/                      # React application
+│   ├── Dockerfile                 # Production build
+│   ├── Dockerfile.dev             # Development build
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── vite.config.js
+│   ├── tailwind.config.js
+│   ├── index.html
+│   ├── public/
+│   └── src/
+│       ├── App.jsx                # Main app component
+│       ├── main.jsx               # Entry point
+│       ├── components/
+│       │   ├── QueryInterface.jsx
+│       │   ├── ResultsTable.jsx
+│       │   ├── RagasScoreDisplay.jsx
+│       │   └── ErrorDisplay.jsx
+│       ├── services/
+│       │   └── api.js             # Axios API client
+│       └── styles/
+│           └── index.css          # Tailwind imports
+│
+├── backend/                       # FastAPI application
+│   ├── Dockerfile                 # Production image
+│   ├── Dockerfile.dev             # Development image
+│   ├── requirements.txt           # Python dependencies
+│   ├── alembic.ini                # Migration config
+│   ├── alembic/                   # Migration scripts
+│   │   └── versions/
+│   └── app/
+│       ├── __init__.py
+│       ├── main.py                # FastAPI app initialization
+│       ├── config.py              # Settings (Pydantic BaseSettings)
+│       ├── api/
+│       │   ├── __init__.py
+│       │   ├── routes.py          # API endpoints
+│       │   └── models.py          # Pydantic request/response models
+│       ├── services/
+│       │   ├── __init__.py
+│       │   ├── query_service.py   # Main orchestrator
+│       │   ├── llm_service.py     # OpenAI integration
+│       │   ├── ragas_service.py   # Evaluation
+│       │   └── validation_service.py  # Security
+│       ├── db/
+│       │   ├── __init__.py
+│       │   ├── models.py          # SQLAlchemy ORM models
+│       │   ├── session.py         # DB connection
+│       │   └── seed.py            # Mock data generator
+│       └── utils/
+│           ├── __init__.py
+│           └── logger.py          # Structured logging
+│
+├── scripts/                       # Utility scripts
+│   ├── start.sh                   # Production startup (migrations + seed + server)
+│   └── seed_db.py                 # Standalone seed script
+│
+└── tests/                         # Tests (future)
+    ├── frontend/
+    └── backend/
+```
+
+**Total Files:** ~40 files (manageable for solo developer)
+
+---
+
+## Architecture Decision Records
+
+### ADR-001: Monolith vs Microservices
+
+**Decision:** Modular Monolith
+
+**Context:** Level 2 project, solo developer, demo/interview context
+
+**Rationale:**
+- ✅ Simpler deployment (one container)
+- ✅ No distributed systems complexity
+- ✅ Easier debugging
+- ✅ Faster development
+- ✅ Appropriate for project scope (12 stories)
+- ❌ Less scalable (but not needed for demo)
+
+**Consequences:**
+- Single point of failure (acceptable for demo)
+- All services deploy together (simpler CI/CD)
+
+---
+
+### ADR-002: Railway for Deployment
+
+**Decision:** Railway (single platform)
+
+**Context:** Need Docker support, PostgreSQL, and simple deployment
+
+**Alternatives Considered:**
+- Vercel + Railway (more complex, CDN unnecessary for demo)
+- Heroku (more expensive)
+- AWS (overkill, steep learning curve for beginner)
+
+**Rationale:**
+- ✅ Built-in PostgreSQL
+- ✅ Docker support
+- ✅ Simple deployment (git push)
+- ✅ Affordable ($5-10/month for demo)
+- ✅ Good for interview demonstration
+
+---
+
+### ADR-003: PostgreSQL vs SQLite
+
+**Decision:** PostgreSQL (Railway managed)
+
+**Context:** Database choice for demo application
+
+**Rationale:**
+- ✅ More production-like (better for interview impression)
+- ✅ Railway provides managed instance
+- ✅ Better showcase of real-world patterns
+- ✅ SQL features (indexes, constraints) work better
+- ❌ Slightly more complex than SQLite (but Railway handles it)
+
+**Consequences:**
+- More impressive for technical interview
+- Managed by Railway (no manual DB management)
+
+---
+
+### ADR-004: FastAPI Serves React Build
+
+**Decision:** Single service serves both API and static files
+
+**Context:** Deployment simplification
+
+**Alternatives:**
+- Separate Vercel (frontend) + Railway (backend)
+- Two Railway services
+
+**Rationale:**
+- ✅ Simpler deployment (one service)
+- ✅ No CORS issues (same origin)
+- ✅ Fewer environment variables
+- ✅ Easier demo day troubleshooting
+- ❌ No CDN benefits (but unnecessary for demo)
+
+---
+
+### ADR-005: OpenAI GPT-4o-mini vs Claude
+
+**Decision:** OpenAI GPT-4o-mini
+
+**Context:** LLM provider selection
+
+**Rationale:**
+- ✅ Preference stated by user
+- ✅ Cost-effective ($0.150 per 1M input tokens)
+- ✅ Reliable for NL→SQL
+- ✅ Structured output support
+- ✅ Well-documented Python SDK
+
+**Consequences:**
+- OpenAI API key required
+- Cost ~$0.01 per demo session (very cheap)
+
+---
+
+## Implementation Guidance
+
+### Development Phases (Aligned with Epics)
+
+**Phase 1: Epic 1 - Core Application (Stories 1.1-1.8)**
+
+**Week 1: Foundation**
+- Set up monorepo structure
+- Docker Compose configuration
+- PostgreSQL setup with migrations
+- Mock data seed script
+
+**Week 2: Backend Core**
+- FastAPI app skeleton
+- Database models (SQLAlchemy)
+- LLM integration (OpenAI)
+- SQL validation service
+
+**Week 3: Frontend + Integration**
+- React + Tailwind UI
+- API client (Axios)
+- End-to-end query flow
+- Error handling
+
+**Phase 2: Epic 2 - Ragas Evaluation (Stories 2.1-2.4)**
+
+**Week 4: Evaluation Framework**
+- Ragas integration
+- Metrics calculation
+- Frontend score display
+- Comparative reporting
+
+**Phase 3: Deployment & Polish**
+
+**Week 5: Deployment**
+- Railway setup
+- Environment variables
+- Production build testing
+- Demo rehearsal
+
+**Week 6: Documentation & Presentation**
+- README finalization
+- Project Report
+- Architecture diagrams
+- Demo script preparation
+
+---
+
+### Key Implementation Notes
+
+**1. Schema-Aware Prompting (Critical for Ragas Faithfulness)**
+
+Include full schema in system prompt:
+```python
+SCHEMA_PROMPT = """
+Table: employees
+Columns:
+  - employee_id: Integer, Primary Key
+  - first_name: String (100 chars max)
+  - last_name: String (100 chars max)
+  - department: String (100 chars max)
+  - role: String (100 chars max)
+  - employment_status: String ('Active', 'Terminated', 'On Leave')
+  - hire_date: Date
+  - leave_type: String (nullable, 'Parental Leave', 'Medical Leave', 'Sick Leave')
+  - salary_local: Decimal (12,2)
+  - salary_usd: Decimal (12,2)
+  - manager_name: String (nullable, 200 chars max)
+"""
+```
+
+**2. Few-Shot Examples (Boosts Reliability)**
+
+```python
+FEW_SHOT_EXAMPLES = """
+Example 1:
+Query: "Show me employees hired in the last 6 months"
+SQL: SELECT * FROM employees WHERE hire_date >= CURRENT_DATE - INTERVAL '6 months'
+
+Example 2:
+Query: "List Engineering employees with salary over 120K"
+SQL: SELECT * FROM employees WHERE department = 'Engineering' AND salary_usd > 120000
+
+Example 3:
+Query: "Who is on parental leave?"
+SQL: SELECT * FROM employees WHERE leave_type = 'Parental Leave'
+
+Example 4:
+Query: "Show employees managed by John Doe"
+SQL: SELECT * FROM employees WHERE manager_name = 'John Doe'
+"""
+```
+
+**3. Error Handling Pattern**
+
+```python
+from fastapi import HTTPException
+
+try:
+    # Service call
+    result = await query_service.execute(query)
+except ValidationError as e:
+    raise HTTPException(status_code=400, detail=str(e))
+except LLMError as e:
+    raise HTTPException(status_code=500, detail="LLM service unavailable")
+except DatabaseError as e:
+    logger.error(f"Database error: {e}")
+    raise HTTPException(status_code=500, detail="Database query failed")
+```
+
+**4. Logging Best Practice**
+
+```python
+import structlog
+
+logger = structlog.get_logger()
+
+logger.info(
+    "query_executed",
+    query=nl_query,
+    generated_sql=sql,
+    result_count=len(results),
+    faithfulness_score=scores['faithfulness']
+)
+```
+
+**5. Frontend API Client**
+
+```javascript
+// src/services/api.js
+import axios from 'axios';
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || '/api',
+  timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+export const executeQuery = async (query) => {
+  try {
+    const response = await api.post('/query', { query });
+    return response.data;
+  } catch (error) {
+    if (error.response?.data?.error) {
+      throw new Error(error.response.data.error);
+    }
+    throw new Error('Failed to execute query');
+  }
+};
+```
+
+---
+
+## Next Steps After Architecture
+
+1. **Tech Spec Generation (Phase 3, Step 9)**
+   - Generate `tech-spec-epic-1.md` (Core Application)
+   - Generate `tech-spec-epic-2.md` (Ragas Evaluation)
+
+2. **Story Creation (Phase 4)**
+   - Scrum Master generates detailed stories with acceptance criteria
+   - Story-context feature (BMad v6) creates focused implementation context
+
+3. **Implementation**
+   - Follow epic sequence (Core first, Ragas second)
+   - Use tech specs as implementation guide
+
+4. **Demo Preparation**
+   - Test all 4 mandatory queries
+   - Rehearse Ragas explanation
+   - Prepare backup plan (screenshots/video)
+
+---
+
+**Document Status:** ✅ Complete and ready for tech spec generation
+
+**Architect:** Winston
+**Date:** 2025-10-01
+**Version:** 1.0
+
+---
+
+_This architecture balances beginner-friendly explanations with production-quality patterns, appropriate for a Level 2 interview demonstration project._

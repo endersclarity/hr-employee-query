@@ -1,0 +1,1251 @@
+# Technical Specification: Epic 1 - Core NL-to-SQL Query Application
+
+Date: 2025-10-01
+Author: Kaelen
+Epic ID: Epic 1
+Status: Draft
+
+---
+
+## Overview
+
+Epic 1 delivers the foundational full-stack web application that enables natural language querying of HR employee records. This epic encompasses the complete user journey from query input through LLM-powered SQL generation, secure query validation, database execution, and results display. The system converts natural language queries (e.g., "Show me employees in Engineering with salary greater than 120K") into validated SQL statements, executes them against a PostgreSQL database, and returns results in a user-friendly tabular format. Built using React + Tailwind (frontend) and FastAPI + Python (backend), this epic establishes the core infrastructure and functionality that Epic 2 will later evaluate using Ragas metrics.
+
+## Objectives and Scope
+
+### Objectives
+1. **Deliver Core User Functionality**: Enable HR professionals to query employee data using natural language without SQL knowledge
+2. **Demonstrate Multi-Layered Security**: Implement database-level permissions, prompt engineering safeguards, input sanitization, and SQL validation
+3. **Establish Production-Quality Patterns**: Create modular, maintainable code architecture suitable for job interview demonstration
+4. **Support Mandatory Query Types**: Handle all 4 required query patterns (date range, department+salary, leave type, manager name)
+
+### In-Scope (Epic 1)
+- ✅ React frontend with query input, submit button, and results table display
+- ✅ FastAPI backend with REST API (`POST /api/query`, `GET /api/health`)
+- ✅ PostgreSQL database with employee schema and 50+ mock records
+- ✅ OpenAI GPT-4o-mini integration for NL→SQL conversion with schema-aware prompting
+- ✅ SQL validation layer (whitelist SELECT, block malicious operations)
+- ✅ Read-only database connection for security
+- ✅ Error handling and user feedback for failed queries
+- ✅ Docker Compose for local development
+- ✅ Basic logging (structured logs via structlog)
+
+### Out-of-Scope (Epic 1)
+- ❌ Ragas evaluation metrics (handled in Epic 2)
+- ❌ Comparative reporting and recommendations (Epic 2)
+- ❌ User authentication/authorization (beyond MVP)
+- ❌ Query history persistence across sessions (beyond MVP)
+- ❌ Advanced visualizations (charts/graphs)
+- ❌ Multi-tenant architecture
+
+## System Architecture Alignment
+
+This epic implements the core architecture defined in `solution-architecture.md`:
+
+**Architectural Pattern**: Modular Monolith with logical service boundaries (query_service, llm_service, validation_service)
+
+**Repository Strategy**: Monorepo structure with `/frontend` and `/backend` directories
+
+**Key Architectural Components Implemented**:
+- **Frontend Layer**: React 18.3.1 + Tailwind CSS 3.4.1 + Vite 5.0.0 (ADR-001)
+- **Backend Layer**: FastAPI 0.109.0 + Python 3.11+ with async support
+- **Data Layer**: PostgreSQL 15+ (Railway managed) with SQLAlchemy 2.0.25 ORM (ADR-003)
+- **LLM Integration**: OpenAI GPT-4o-mini via official Python SDK 1.10.0 (ADR-005)
+- **Security Layer**: Multi-layered approach (DB permissions + prompt engineering + input sanitization + SQL validation)
+- **Deployment**: Docker Compose for local dev, Railway for production (ADR-002, ADR-004)
+
+**Constraints Adhered To**:
+- Single-service deployment (FastAPI serves both API and React static files)
+- Read-only database connection (`query_app_readonly` user)
+- Maximum 500 character query length
+- 5-second response time target (NFR002)
+
+## Detailed Design
+
+### Services and Modules
+
+| Module | Responsibility | Inputs | Outputs | Owner/Location |
+|--------|---------------|--------|---------|----------------|
+| **QueryInterface** (React) | User input capture and submission | User keystrokes | Query string, submit event | `frontend/src/components/QueryInterface.jsx` |
+| **ResultsTable** (React) | Display query results in tabular format | Results array from API | Rendered HTML table | `frontend/src/components/ResultsTable.jsx` |
+| **ErrorDisplay** (React) | Show error messages to user | Error object from API | Formatted error message | `frontend/src/components/ErrorDisplay.jsx` |
+| **API Client** (JS) | HTTP communication with backend | Query string | Promise<Response> | `frontend/src/services/api.js` |
+| **routes.py** (FastAPI) | API endpoint routing and request handling | HTTP POST /api/query | JSON response | `backend/app/api/routes.py` |
+| **query_service** (Python) | Orchestrate NL→SQL→Results flow | Natural language query | QueryResponse with results + metadata | `backend/app/services/query_service.py` |
+| **llm_service** (Python) | OpenAI integration for SQL generation | NL query + schema context | Generated SQL string | `backend/app/services/llm_service.py` |
+| **validation_service** (Python) | SQL security validation | SQL string | Boolean (valid/invalid) + error | `backend/app/services/validation_service.py` |
+| **Database Layer** (SQLAlchemy) | Execute SQL queries and return results | Validated SQL | List of employee records | `backend/app/db/session.py` |
+| **seed.py** (Python) | Generate mock employee data | Database connection | 50+ employee records | `backend/app/db/seed.py` |
+
+### Data Models and Contracts
+
+#### Database Schema (PostgreSQL)
+
+**employees table**:
+```sql
+CREATE TABLE employees (
+    employee_id SERIAL PRIMARY KEY,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    department VARCHAR(100) NOT NULL,
+    role VARCHAR(100) NOT NULL,
+    employment_status VARCHAR(50) NOT NULL,  -- 'Active', 'Terminated', 'On Leave'
+    hire_date DATE NOT NULL,
+    leave_type VARCHAR(50),  -- NULL or 'Parental Leave', 'Medical Leave', 'Sick Leave'
+    salary_local DECIMAL(12, 2) NOT NULL,
+    salary_usd DECIMAL(12, 2) NOT NULL,
+    manager_name VARCHAR(200),  -- NULL or manager full name
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for query performance
+CREATE INDEX idx_department ON employees(department);
+CREATE INDEX idx_hire_date ON employees(hire_date);
+CREATE INDEX idx_employment_status ON employees(employment_status);
+CREATE INDEX idx_manager_name ON employees(manager_name);
+```
+
+**Rationale**: Indexes optimize the 4 mandatory query types (department filter, hire_date range, employment_status, manager_name lookup).
+
+#### API Request/Response Models (Pydantic)
+
+**QueryRequest** (`backend/app/api/models.py`):
+```python
+from pydantic import BaseModel, Field
+
+class QueryRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=500, description="Natural language query")
+```
+
+**QueryResponse** (`backend/app/api/models.py`):
+```python
+from typing import List, Dict, Any
+from pydantic import BaseModel
+
+class QueryResponse(BaseModel):
+    success: bool
+    query: str
+    generated_sql: str | None = None
+    results: List[Dict[str, Any]] = []
+    result_count: int = 0
+    execution_time_ms: int = 0
+    error: str | None = None
+    error_type: str | None = None  # 'VALIDATION_ERROR', 'LLM_ERROR', 'DB_ERROR'
+```
+
+**HealthResponse**:
+```python
+class HealthResponse(BaseModel):
+    status: str  # 'healthy' or 'unhealthy'
+    database: str  # 'connected' or 'disconnected'
+    timestamp: str
+```
+
+#### ORM Models (SQLAlchemy)
+
+**Employee** (`backend/app/db/models.py`):
+```python
+from sqlalchemy import Column, Integer, String, Date, DECIMAL, TIMESTAMP
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
+
+class Employee(Base):
+    __tablename__ = 'employees'
+
+    employee_id = Column(Integer, primary_key=True, autoincrement=True)
+    first_name = Column(String(100), nullable=False)
+    last_name = Column(String(100), nullable=False)
+    department = Column(String(100), nullable=False)
+    role = Column(String(100), nullable=False)
+    employment_status = Column(String(50), nullable=False)
+    hire_date = Column(Date, nullable=False)
+    leave_type = Column(String(50), nullable=True)
+    salary_local = Column(DECIMAL(12, 2), nullable=False)
+    salary_usd = Column(DECIMAL(12, 2), nullable=False)
+    manager_name = Column(String(200), nullable=True)
+    created_at = Column(TIMESTAMP, server_default='CURRENT_TIMESTAMP')
+    updated_at = Column(TIMESTAMP, server_default='CURRENT_TIMESTAMP', onupdate='CURRENT_TIMESTAMP')
+```
+
+### APIs and Interfaces
+
+#### REST API Endpoints
+
+**Base URL**: `/api` (production: `https://your-app.railway.app/api`)
+
+---
+
+**POST /api/query**
+
+Execute natural language query and return results.
+
+**Request**:
+```http
+POST /api/query
+Content-Type: application/json
+
+{
+  "query": "Show me employees in Engineering with salary greater than 120K"
+}
+```
+
+**Response (Success - 200)**:
+```json
+{
+  "success": true,
+  "query": "Show me employees in Engineering with salary greater than 120K",
+  "generated_sql": "SELECT employee_id, first_name, last_name, department, salary_usd FROM employees WHERE department = 'Engineering' AND salary_usd > 120000",
+  "results": [
+    {
+      "employee_id": 42,
+      "first_name": "Alice",
+      "last_name": "Johnson",
+      "department": "Engineering",
+      "salary_usd": 135000.00
+    }
+  ],
+  "result_count": 1,
+  "execution_time_ms": 1243
+}
+```
+
+**Response (Validation Error - 400)**:
+```json
+{
+  "success": false,
+  "error": "Query validation failed: Only SELECT queries are permitted",
+  "error_type": "VALIDATION_ERROR"
+}
+```
+
+**Response (LLM Error - 500)**:
+```json
+{
+  "success": false,
+  "error": "Failed to generate SQL from natural language query",
+  "error_type": "LLM_ERROR"
+}
+```
+
+**Response (Database Error - 500)**:
+```json
+{
+  "success": false,
+  "error": "Database query execution failed",
+  "error_type": "DB_ERROR"
+}
+```
+
+**Error Codes**:
+- `400` - Invalid request (query too long, empty query, validation failure)
+- `500` - Server error (LLM failure, database connection issue)
+
+---
+
+**GET /api/health**
+
+Health check endpoint for monitoring.
+
+**Response (200)**:
+```json
+{
+  "status": "healthy",
+  "database": "connected",
+  "timestamp": "2025-10-01T14:30:00Z"
+}
+```
+
+**Response (503 - Unhealthy)**:
+```json
+{
+  "status": "unhealthy",
+  "database": "disconnected",
+  "timestamp": "2025-10-01T14:30:00Z"
+}
+```
+
+#### OpenAI API Integration
+
+**Service**: `llm_service.py`
+
+**System Prompt Template**:
+```python
+SYSTEM_PROMPT = """You are a SQL query generator for an HR employee database.
+
+CRITICAL RULES:
+1. Generate ONLY SELECT statements
+2. Never generate DELETE, DROP, UPDATE, INSERT, or ALTER statements
+3. Only query the 'employees' table
+4. Use these columns only: {column_list}
+
+If the user's request cannot be fulfilled with a SELECT query, respond with: "INVALID_REQUEST"
+
+Schema:
+{schema_definition}
+
+Examples:
+{few_shot_examples}
+"""
+```
+
+**LLM Request**:
+```python
+response = await openai_client.chat.completions.create(
+    model="gpt-4o-mini",
+    messages=[
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": natural_language_query}
+    ],
+    temperature=0.0,  # Deterministic output
+    max_tokens=200    # SQL queries are concise
+)
+```
+
+**Error Handling**:
+- Rate limit errors → Retry with exponential backoff (max 3 attempts)
+- Network errors → Return LLM_ERROR to client
+- Invalid API key → Log critical error, return 500
+
+### Workflows and Sequencing
+
+#### Primary Query Flow (Happy Path)
+
+```
+[User] → [React QueryInterface] → [API Client] → [POST /api/query]
+                                                        ↓
+                                                [FastAPI routes.py]
+                                                        ↓
+                                                [query_service.execute()]
+                                                        ↓
+                                    ┌───────────────────┴──────────────────┐
+                                    ↓                                      ↓
+                            [llm_service.generate_sql()]          [sanitize_input()]
+                                    ↓
+                            (OpenAI API Call)
+                                    ↓
+                            Generated SQL ────────────────────────────────┐
+                                                                          ↓
+                                                        [validation_service.validate_sql()]
+                                                                          ↓
+                                                        ✓ Whitelist SELECT only
+                                                        ✓ Block malicious keywords
+                                                        ✓ Verify 'employees' table only
+                                                                          ↓
+                                                        [db.session.execute(sql)]
+                                                                          ↓
+                                                        [PostgreSQL Query]
+                                                                          ↓
+                                                        Results (List[Dict])
+                                                                          ↓
+                                                        [QueryResponse JSON]
+                                                                          ↓
+                                                        [React ResultsTable]
+                                                                          ↓
+                                                        [User sees results]
+```
+
+**Step-by-Step Sequence**:
+
+1. **User Input**: User types "Show me employees in Engineering with salary > 120K" and clicks Submit
+2. **Frontend Validation**: React validates query length (1-500 chars), shows loading spinner
+3. **API Request**: Axios POST to `/api/query` with `{query: "..."}`
+4. **Input Sanitization**: Remove SQL comments (`--`, `/* */`), semicolons, trim whitespace
+5. **LLM Generation**: Send to OpenAI GPT-4o-mini with schema-aware system prompt
+6. **SQL Validation**: Parse generated SQL with `sqlparse`, check:
+   - Is it a SELECT statement? (Yes → Continue, No → Error)
+   - Contains dangerous keywords? (Yes → Error, No → Continue)
+   - References only 'employees' table? (Yes → Continue, No → Error)
+7. **Database Execution**: Execute validated SQL via read-only connection
+8. **Response Assembly**: Package results + metadata into QueryResponse
+9. **Frontend Display**: Render results in table, hide loading spinner
+
+**Estimated Latency**: 1.2-3.5 seconds (LLM call = 0.8-2.5s, DB query = 50-300ms, validation = 10-50ms)
+
+#### Error Flow Examples
+
+**Malicious Query Detection**:
+```
+User: "DELETE FROM employees WHERE department = 'Engineering'"
+      ↓
+Sanitization: Remove semicolons (none present)
+      ↓
+LLM: Generates "DELETE FROM employees WHERE department = 'Engineering'"
+      ↓
+Validation: Detects "DELETE" keyword → REJECT
+      ↓
+Response: 400 Bad Request, error_type="VALIDATION_ERROR"
+      ↓
+Frontend: Show error message "Only SELECT queries are permitted"
+```
+
+**LLM Failure**:
+```
+User: "Show me employees in Finance"
+      ↓
+API Request → llm_service
+      ↓
+OpenAI API: Rate limit exceeded (429 error)
+      ↓
+Retry with backoff (3 attempts)
+      ↓
+All retries fail
+      ↓
+Response: 500 Server Error, error_type="LLM_ERROR"
+      ↓
+Frontend: "Unable to process query. Please try again."
+```
+
+## Non-Functional Requirements
+
+### Performance
+
+**Target**: Query response time < 5 seconds (NFR002 from PRD)
+
+**Breakdown**:
+- Frontend rendering: < 50ms
+- Network latency: 50-200ms (Railway → user)
+- API processing time: < 4.7 seconds
+  - Input sanitization: 5-10ms
+  - LLM API call: 800-2500ms (OpenAI GPT-4o-mini)
+  - SQL validation: 10-50ms (sqlparse)
+  - Database query: 50-300ms (indexed queries)
+  - JSON serialization: 20-100ms
+
+**Optimization Strategies**:
+1. **Database Indexing**: Indexes on `department`, `hire_date`, `employment_status`, `manager_name` reduce query time to 50-100ms
+2. **LLM Temperature = 0.0**: Deterministic output reduces variance in response time
+3. **Result Limiting**: Max 1000 rows prevents large payload serialization delays
+4. **Connection Pooling**: SQLAlchemy connection pool (size=10) reuses DB connections
+5. **Async Processing**: FastAPI async endpoints + OpenAI async client for non-blocking I/O
+
+**Monitoring**:
+- Log `execution_time_ms` for every query
+- Track P50, P95, P99 latencies (future enhancement)
+- Alert if > 10% of queries exceed 5s threshold
+
+### Security
+
+**Requirement**: Multi-layered security to prevent SQL injection and data manipulation (NFR001 from PRD)
+
+**Layer 1: Database-Level Permissions**
+```sql
+-- Create read-only user
+CREATE USER query_app_readonly WITH PASSWORD 'secure_random_password';
+GRANT CONNECT ON DATABASE hr_db TO query_app_readonly;
+GRANT SELECT ON employees TO query_app_readonly;
+REVOKE ALL ON employees FROM query_app_readonly;
+GRANT SELECT ON employees TO query_app_readonly;
+```
+- Even if SQL injection succeeds, no write operations possible
+- Connection string uses `query_app_readonly` user only
+
+**Layer 2: Prompt Engineering Safeguards**
+- System prompt explicitly forbids DELETE/DROP/UPDATE/INSERT/ALTER
+- LLM instructed to respond "INVALID_REQUEST" for non-SELECT queries
+- Schema limited to 'employees' table only in prompt context
+
+**Layer 3: Input Sanitization** (`sanitize_input()` in validation_service.py)
+```python
+def sanitize_input(query: str) -> str:
+    # Remove SQL comment indicators
+    query = query.replace('--', '').replace('/*', '').replace('*/', '')
+    # Remove semicolons (prevent multi-statement injection)
+    query = query.replace(';', '')
+    # Enforce length limit
+    if len(query) > 500:
+        raise ValueError("Query too long (max 500 characters)")
+    return query.strip()
+```
+
+**Layer 4: SQL Query Validation** (`validate_sql()` in validation_service.py)
+```python
+import sqlparse
+
+def validate_sql(sql: str) -> bool:
+    parsed = sqlparse.parse(sql)
+    if not parsed:
+        raise ValueError("Invalid SQL syntax")
+
+    stmt = parsed[0]
+    if stmt.get_type() != 'SELECT':
+        raise ValueError("Only SELECT queries allowed")
+
+    dangerous_keywords = ['DELETE', 'DROP', 'UPDATE', 'INSERT', 'ALTER', 'CREATE', 'TRUNCATE']
+    sql_upper = sql.upper()
+    for keyword in dangerous_keywords:
+        if keyword in sql_upper:
+            raise ValueError(f"Dangerous keyword detected: {keyword}")
+
+    if 'employees' not in sql.lower():
+        raise ValueError("Only 'employees' table permitted")
+
+    return True
+```
+
+**Layer 5: Environment Variable Protection**
+- OpenAI API key stored in `.env` file (gitignored)
+- Railway secrets for production deployment
+- No hardcoded credentials in codebase
+
+**Additional Measures**:
+- CORS configured for specific origins only (not `*`)
+- HTTPS enforced in production (Railway default)
+- No sensitive data logged (PII redacted from logs)
+
+### Reliability/Availability
+
+**Target**: 99% uptime during demo period (acceptable for MVP/interview demo, not production SLA)
+
+**Error Handling Strategy**:
+
+1. **LLM Failures**:
+   - Retry with exponential backoff (3 attempts: 1s, 2s, 4s delays)
+   - If all retries fail → Return 500 with `LLM_ERROR` error type
+   - Fallback: Log error, allow user to retry manually
+
+2. **Database Connection Failures**:
+   - SQLAlchemy connection pool (size=10) with automatic retry
+   - Health check endpoint (`/api/health`) detects DB connectivity
+   - Railway auto-restarts service on crash
+
+3. **Validation Errors**:
+   - Return 400 Bad Request with clear error message
+   - No retry needed (user must modify query)
+
+4. **Frontend Error Boundaries**:
+   - React error boundaries catch component crashes
+   - Display user-friendly error message instead of blank screen
+
+**Graceful Degradation**:
+- If LLM unavailable: Display "Service temporarily unavailable" instead of crashing
+- If database slow: Show loading spinner up to 10s before timeout
+- No cascading failures (errors contained to single request)
+
+### Observability
+
+**Logging Framework**: `structlog` for structured JSON logs
+
+**Log Levels**:
+- `INFO`: Successful queries, execution metrics
+- `WARNING`: Validation failures, retry attempts
+- `ERROR`: LLM failures, database errors
+- `CRITICAL`: Service startup failures, configuration errors
+
+**Key Log Events**:
+
+```python
+# Query execution log
+logger.info(
+    "query_executed",
+    query=nl_query,
+    generated_sql=sql,
+    result_count=len(results),
+    execution_time_ms=elapsed_time,
+    user_ip=request.client.host  # For demo analytics
+)
+
+# Validation failure log
+logger.warning(
+    "validation_failed",
+    query=nl_query,
+    generated_sql=sql,
+    error_type="DANGEROUS_KEYWORD",
+    keyword_detected="DELETE"
+)
+
+# LLM error log
+logger.error(
+    "llm_error",
+    query=nl_query,
+    error_message=str(e),
+    retry_attempt=attempt_number
+)
+```
+
+**Metrics to Track** (manual inspection for MVP, automated in production):
+- Total queries processed
+- Average execution time
+- Error rate by type (VALIDATION_ERROR, LLM_ERROR, DB_ERROR)
+- Top 10 most common queries
+
+**Railway Logs**:
+- All logs streamed to Railway dashboard
+- 7-day retention (Railway free tier)
+- JSON format for easy parsing
+
+## Dependencies and Integrations
+
+### Python Backend Dependencies (`backend/requirements.txt`)
+
+**Core Framework**:
+```
+fastapi==0.109.0          # Web framework
+uvicorn[standard]==0.27.0 # ASGI server
+pydantic==2.5.3           # Data validation
+python-dotenv==1.0.0      # Environment variables
+```
+
+**Database**:
+```
+sqlalchemy==2.0.25        # ORM
+psycopg2-binary==2.9.9    # PostgreSQL driver
+alembic==1.13.1           # Database migrations
+```
+
+**LLM Integration**:
+```
+openai==1.10.0            # OpenAI SDK
+```
+
+**Security & Validation**:
+```
+sqlparse==0.4.4           # SQL parsing and validation
+```
+
+**Logging**:
+```
+structlog==24.1.0         # Structured logging
+```
+
+**CORS**:
+```
+# fastapi-cors (built-in to FastAPI, no separate install)
+```
+
+**Total**: ~10 production dependencies
+
+### Frontend Dependencies (`frontend/package.json`)
+
+**Core Framework**:
+```json
+{
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "axios": "^1.6.5"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "tailwindcss": "^3.4.1",
+    "@vitejs/plugin-react": "^4.2.1",
+    "postcss": "^8.4.33",
+    "autoprefixer": "^10.4.16"
+  }
+}
+```
+
+**Total**: 3 runtime dependencies, 5 dev dependencies
+
+### External Service Integrations
+
+| Service | Purpose | API Version | Authentication | Rate Limits |
+|---------|---------|-------------|----------------|-------------|
+| **OpenAI API** | NL→SQL generation | GPT-4o-mini | API Key (env var) | 500 RPM (free tier), 10,000 RPM (paid) |
+| **Railway PostgreSQL** | Managed database | PostgreSQL 15+ | Auto-injected `DATABASE_URL` | No explicit limit (managed service) |
+| **Railway Platform** | Deployment & hosting | - | GitHub OAuth | Free tier: 500 hours/month |
+
+### Configuration Requirements
+
+**Environment Variables** (`.env` for local, Railway secrets for production):
+```bash
+# Required
+OPENAI_API_KEY=sk-proj-xxxxx                    # OpenAI API key
+DATABASE_URL=postgresql://user:pass@host:5432/db # Auto-provided by Railway
+
+# Optional
+PYTHON_ENV=development|production               # Environment mode
+ALLOWED_ORIGINS=http://localhost:5173           # CORS origins (comma-separated)
+LOG_LEVEL=INFO                                  # Logging verbosity
+```
+
+### Integration Points Summary
+
+1. **Frontend ↔ Backend**: REST API over HTTP/HTTPS
+2. **Backend ↔ OpenAI**: HTTPS API calls to `https://api.openai.com/v1/chat/completions`
+3. **Backend ↔ PostgreSQL**: TCP connection via SQLAlchemy (read-only user)
+4. **Development ↔ Docker**: Docker Compose orchestration for local services
+
+## Acceptance Criteria (Authoritative)
+
+These are the atomic, testable criteria that define Epic 1 completion. All must be satisfied for Epic 1 to be considered complete.
+
+### Functional Acceptance Criteria
+
+**AC1**: User can enter a natural language query (1-500 characters) in a text input field and click a submit button
+- **Test**: Input "Show me employees in Engineering with salary > 120K" and click submit
+- **Expected**: Query is accepted and processed
+
+**AC2**: System successfully converts all 4 mandatory query types to valid SQL:
+- **Test 1**: "Show me employees hired in the last 6 months" → `SELECT * FROM employees WHERE hire_date >= CURRENT_DATE - INTERVAL '6 months'`
+- **Test 2**: "List Engineering employees with salary > 120K" → `SELECT * FROM employees WHERE department = 'Engineering' AND salary_usd > 120000`
+- **Test 3**: "Who is on parental leave?" → `SELECT * FROM employees WHERE leave_type = 'Parental Leave'`
+- **Test 4**: "Show employees managed by John Doe" → `SELECT * FROM employees WHERE manager_name = 'John Doe'`
+- **Expected**: All generate valid, executable SQL
+
+**AC3**: System blocks malicious queries and returns appropriate error messages
+- **Test 1**: "DELETE FROM employees WHERE department = 'Engineering'" → 400 error, "Only SELECT queries permitted"
+- **Test 2**: "DROP TABLE employees" → 400 error, validation failure
+- **Test 3**: "UPDATE employees SET salary_usd = 0" → 400 error, dangerous keyword detected
+- **Expected**: All malicious queries rejected before execution
+
+**AC4**: Query results are displayed in a tabular format with appropriate column headers
+- **Test**: Execute "Show me employees in Engineering" → Results table shows columns: employee_id, first_name, last_name, department, role, salary_usd
+- **Expected**: Table renders with headers and data rows
+
+**AC5**: Database contains 50+ employee records covering all test scenarios
+- **Test**: Query "Show employees hired in last 6 months" returns at least 5 results
+- **Test**: Query "Show Engineering employees with salary > 120K" returns at least 3 results
+- **Test**: Query "Who is on parental leave?" returns at least 2 results
+- **Test**: Query "Show employees managed by John Doe" returns at least 4 results
+- **Expected**: All queries return non-empty results
+
+**AC6**: Database connection uses read-only user with SELECT-only permissions
+- **Test**: Manually attempt `INSERT INTO employees ...` using application's database connection
+- **Expected**: Permission denied error from PostgreSQL
+
+**AC7**: System responds within 5 seconds for all queries (NFR002)
+- **Test**: Execute 10 sample queries, measure end-to-end response time
+- **Expected**: All queries complete in < 5 seconds (P95 latency)
+
+**AC8**: Error messages are displayed to user when queries fail
+- **Test**: Submit query with 501 characters → "Query too long (max 500 characters)"
+- **Test**: Submit empty query → "Query cannot be empty"
+- **Test**: Disconnect database, submit query → "Database query failed"
+- **Expected**: User-friendly error messages displayed in UI
+
+### Non-Functional Acceptance Criteria
+
+**AC9**: Docker Compose starts all services successfully
+- **Test**: Run `docker-compose up` from project root
+- **Expected**: Frontend (port 5173), backend (port 8000), and PostgreSQL (port 5432) all start without errors
+
+**AC10**: API endpoint returns structured JSON responses
+- **Test**: POST `/api/query` with `{"query": "Show me all employees"}` → Response has `success`, `query`, `generated_sql`, `results`, `result_count`, `execution_time_ms` fields
+- **Expected**: JSON schema matches QueryResponse Pydantic model
+
+**AC11**: Health check endpoint responds correctly
+- **Test**: GET `/api/health` → Returns `{"status": "healthy", "database": "connected", "timestamp": "..."}`
+- **Expected**: 200 status code with valid health data
+
+**AC12**: Structured logs capture query execution metrics
+- **Test**: Execute a query, check logs for `query_executed` event with fields: `query`, `generated_sql`, `result_count`, `execution_time_ms`
+- **Expected**: JSON logs contain all required fields
+
+## Traceability Mapping
+
+This table maps acceptance criteria → technical specification sections → implementation components → test strategies.
+
+| AC | PRD Requirement | Spec Section(s) | Component(s) | Test Approach |
+|----|----------------|-----------------|--------------|---------------|
+| **AC1** | FR001 (User input interface) | Services & Modules → QueryInterface | `frontend/src/components/QueryInterface.jsx` | Manual UI test: Enter query, verify submission |
+| **AC2** | FR002, FR005 (NL→SQL, mandatory queries) | APIs & Interfaces → OpenAI Integration, Workflows → Query Flow | `backend/app/services/llm_service.py` | Integration test: 4 example queries → verify SQL output |
+| **AC3** | FR006, FR010 (SQL validation, malicious detection) | Security → Layer 4 SQL Validation | `backend/app/services/validation_service.py` | Unit test: Malicious queries → verify rejection with 400 error |
+| **AC4** | FR004 (Tabular results) | Services & Modules → ResultsTable | `frontend/src/components/ResultsTable.jsx` | Manual UI test: Execute query, verify table renders correctly |
+| **AC5** | FR011 (Database schema), Story 1.2 | Data Models → Database Schema | `backend/app/db/seed.py` | Data validation: Query database, count matching records |
+| **AC6** | FR012, NFR001 (Read-only connection) | Security → Layer 1 DB Permissions | `backend/app/db/session.py` (connection string) | Manual DB test: Attempt INSERT with app credentials → verify rejection |
+| **AC7** | NFR002 (Performance <5s) | Performance → Target & Breakdown | All components (end-to-end flow) | Load test: 10 queries, measure P95 latency |
+| **AC8** | FR010 (Error messages) | Services & Modules → ErrorDisplay, Workflows → Error Flow | `frontend/src/components/ErrorDisplay.jsx` | Unit + integration test: Trigger errors → verify user-friendly messages |
+| **AC9** | NFR003 (Docker deployment) | Deployment Architecture → Docker Compose | `docker-compose.yml` | Manual deployment test: `docker-compose up` → verify all services start |
+| **AC10** | FR013 (REST API JSON responses) | APIs & Interfaces → POST /api/query | `backend/app/api/models.py` (QueryResponse) | API integration test: POST request → validate JSON schema |
+| **AC11** | NFR003 (Deployment health) | APIs & Interfaces → GET /api/health | `backend/app/api/routes.py` | API test: GET `/api/health` → verify 200 + status fields |
+| **AC12** | NFR005 (Logging/documentation) | Observability → Key Log Events | `backend/app/utils/logger.py` | Log inspection: Execute query → verify structured JSON log |
+
+### Story → Acceptance Criteria Mapping
+
+| Story | Primary AC(s) Covered | Notes | **Critical Dependencies** |
+|-------|----------------------|-------|---------------------------|
+| **Story 1.1** (Project Foundation) | AC9 | Docker Compose setup | **None** - Blocks ALL other stories |
+| **Story 1.2** (Database & Mock Data) | AC5, AC6 | Database schema + seed data + read-only user | Depends on: 1.1; Blocks: 1.7, 1.8 |
+| **Story 1.3** (React Frontend UI) | AC1, AC4, AC8 | Input field, results table, error display | Depends on: 1.1; Blocks: 1.8 |
+| **Story 1.4** (FastAPI Backend) | AC10, AC11 | API endpoints + health check + **CORS** | Depends on: 1.1; Blocks: 1.5, 1.6, 1.7, 1.8 |
+| **Story 1.5** (LLM Integration) | AC2 | NL→SQL conversion + **API key validation** | Depends on: 1.4; Blocks: 1.7, 1.8 |
+| **Story 1.6** (SQL Validation) | AC3 | Security layer + **validation logging** | Depends on: 1.4, 1.5; Blocks: 1.7, 1.8 |
+| **Story 1.7** (SQL Execution) | AC7 | DB query + **timeout + size limits** | Depends on: 1.2, 1.4, 1.5, 1.6; Blocks: 1.8 |
+| **Story 1.8** (Frontend-Backend Integration) | AC1, AC4, AC7, AC8 | End-to-end + **static file serving + error mapping** | Depends on: 1.3, 1.7; **FINAL STORY** |
+
+### Critical Integration Points (Dependency Analysis)
+
+**Integration Point 1: CORS Configuration** (Story 1.4)
+- **Components**: `routes.py` → CORS middleware → `frontend/src/services/api.js`
+- **Risk**: Frontend blocked from calling backend APIs
+- **Implementation**:
+  ```python
+  from fastapi.middleware.cors import CORSMiddleware
+
+  app.add_middleware(
+      CORSMiddleware,
+      allow_origins=os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(","),
+      allow_credentials=True,
+      allow_methods=["GET", "POST"],
+      allow_headers=["*"],
+  )
+  ```
+
+**Integration Point 2: Static File Serving** (Story 1.8)
+- **Components**: FastAPI → React build (`frontend/dist/`)
+- **Risk**: Production deployment won't serve frontend UI
+- **Implementation**:
+  ```python
+  from fastapi.staticfiles import StaticFiles
+  from fastapi.responses import FileResponse
+
+  app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets")
+
+  @app.get("/{full_path:path}")
+  async def serve_react(full_path: str):
+      return FileResponse("frontend/dist/index.html")
+  ```
+
+**Integration Point 3: Environment Variable Validation** (Story 1.1)
+- **Components**: `.env` → Docker Compose → All services
+- **Risk**: Missing API keys cause runtime failures
+- **Implementation**: Create `scripts/validate-env.sh`:
+  ```bash
+  #!/bin/bash
+  required_vars=("OPENAI_API_KEY" "DATABASE_URL")
+  for var in "${required_vars[@]}"; do
+      if [ -z "${!var}" ]; then
+          echo "ERROR: $var is not set"
+          exit 1
+      fi
+  done
+  ```
+
+**Integration Point 4: Database Initialization Order** (Story 1.2)
+- **Components**: Alembic migrations → `seed.py`
+- **Risk**: Seed fails if schema doesn't exist
+- **Implementation**: Update `scripts/start.sh`:
+  ```bash
+  #!/bin/bash
+  # 1. Run migrations FIRST
+  alembic upgrade head
+  # 2. Seed database SECOND (only if empty)
+  python -m app.db.seed
+  # 3. Start server LAST
+  uvicorn app.main:app --host 0.0.0.0 --port 8000
+  ```
+
+**Integration Point 5: OpenAI API Key Validation** (Story 1.5)
+- **Components**: `llm_service.py` startup validation
+- **Risk**: Integration tests fail without clear error
+- **Implementation**:
+  ```python
+  async def validate_api_key():
+      try:
+          await openai_client.chat.completions.create(
+              model="gpt-4o-mini",
+              messages=[{"role": "user", "content": "test"}],
+              max_tokens=5
+          )
+          logger.info("OpenAI API key validated successfully")
+      except Exception as e:
+          logger.critical(f"OpenAI API key validation failed: {e}")
+          raise
+  ```
+
+**Integration Point 6: Error Type Mapping** (Story 1.8)
+- **Components**: Backend error types → Frontend user messages
+- **Risk**: Generic errors instead of helpful messages
+- **Implementation**:
+  ```javascript
+  // frontend/src/services/api.js
+  const ERROR_MESSAGES = {
+      'VALIDATION_ERROR': 'Query validation failed. Only SELECT queries are permitted.',
+      'LLM_ERROR': 'Unable to process query. Please try again or rephrase.',
+      'DB_ERROR': 'Database query failed. Please check your query and try again.'
+  };
+  ```
+
+**Integration Point 7: Request/Response Flow Timeouts** (Stories 1.4, 1.5, 1.7)
+- **Components**: API Client → FastAPI → OpenAI → PostgreSQL
+- **Risk**: Hanging requests exceed 5s performance target
+- **Implementation**:
+  ```python
+  # API timeout
+  @app.post("/api/query", response_model=QueryResponse)
+  async def query(request: QueryRequest, timeout: int = 10):
+      async with asyncio.timeout(timeout):
+          return await query_service.execute(request.query)
+
+  # LLM timeout
+  response = await asyncio.wait_for(
+      openai_client.chat.completions.create(...),
+      timeout=5.0
+  )
+
+  # DB timeout
+  with db.session.begin():
+      db.session.execute(text(sql).execution_options(timeout=3))
+  ```
+
+### Enhanced Story Implementation Checklist (Based on Dependency Analysis)
+
+**Story 1.1 Enhancements** (Foundation):
+- ✅ Create `.env.example` with ALL required variables (OPENAI_API_KEY, DATABASE_URL, PYTHON_ENV, ALLOWED_ORIGINS, LOG_LEVEL)
+- ✅ Add `scripts/validate-env.sh` for startup environment validation
+- ✅ Document port requirements (5173, 8000, 5432) in README
+- ✅ Add `docker-compose.override.yml.example` for local customization
+- ✅ Verify Docker Compose health checks for all services
+
+**Story 1.2 Enhancements** (Database):
+- ✅ Update `scripts/start.sh`: migrations → seed → server (strict order)
+- ✅ Add database connection retry logic in `db/session.py` (max 5 attempts, 2s delay)
+- ✅ Validate seed data POST-insertion (count employees by: department='Engineering' AND salary>120K, hire_date, leave_type, manager_name)
+- ✅ Create read-only user BEFORE seeding
+
+**Story 1.3 Enhancements** (Frontend UI):
+- ✅ Add client-side query length validation (1-500 chars) BEFORE API call
+- ✅ Implement loading state timeout (10s → show timeout error)
+- ✅ Add result pagination UI for > 50 results (optional for MVP)
+
+**Story 1.4 Enhancements** (Backend API):
+- ✅ Configure CORS middleware with explicit origins from env var
+- ✅ Add request ID middleware for distributed tracing
+- ✅ Implement global API request timeout (default 10s)
+- ✅ Add `/api/health` database connection check
+
+**Story 1.5 Enhancements** (LLM Integration):
+- ✅ Validate OpenAI API key on service startup (test completion call)
+- ✅ Add LLM request timeout (5s max via `asyncio.wait_for`)
+- ✅ Log LLM request/response times for performance analysis
+- ✅ Implement query→SQL in-memory cache for demo reliability (optional)
+
+**Story 1.6 Enhancements** (Validation):
+- ✅ Log ALL validation failures with: NL query, generated SQL, failure reason
+- ✅ Add validation performance benchmark test (< 50ms per query)
+- ✅ Test case-insensitive keyword detection ("DeLeTe" should be blocked)
+
+**Story 1.7 Enhancements** (SQL Execution):
+- ✅ Implement query execution timeout (3s max via `execution_options(timeout=3)`)
+- ✅ Add result set size check BEFORE serialization (max 1000 rows, truncate + warn)
+- ✅ Test 0-result queries explicitly (display "No results found")
+- ✅ Add connection pool health monitoring
+
+**Story 1.8 Enhancements** (Integration):
+- ✅ Verify FastAPI serves React static files: `/` → `frontend/dist/index.html`
+- ✅ Create error type mapping in `api.js` (VALIDATION_ERROR, LLM_ERROR, DB_ERROR → user messages)
+- ✅ Test end-to-end with ALL 3 error types
+- ✅ Add frontend request timeout (10s)
+- ✅ Test Railway deployment with static file serving
+
+## Risks, Assumptions, Open Questions
+
+### Risks
+
+**RISK-1: OpenAI API Reliability**
+- **Description**: OpenAI API downtime or rate limiting could block demo
+- **Probability**: Medium (occasional outages, rate limits on free tier)
+- **Impact**: High (core functionality unavailable)
+- **Mitigation**:
+  - Implement retry logic with exponential backoff (3 attempts)
+  - Prepare backup demo video in case of API failure on Oct 12
+  - Use paid OpenAI tier for higher rate limits (10,000 RPM vs 500 RPM)
+  - Cache successful query→SQL mappings for common queries (future enhancement)
+
+**RISK-2: LLM Generates Invalid SQL**
+- **Description**: GPT-4o-mini may generate syntactically invalid or semantically incorrect SQL for edge-case queries
+- **Probability**: Medium (LLMs are probabilistic)
+- **Impact**: Medium (query fails, but user can retry)
+- **Mitigation**:
+  - Validation layer catches syntax errors before execution
+  - Few-shot examples improve reliability for common patterns
+  - Test with diverse queries during development
+  - Display generated SQL to user for transparency (build trust)
+
+**RISK-3: Railway Deployment Issues**
+- **Description**: Railway service crashes, database connection issues, or deployment failures on demo day
+- **Probability**: Low (Railway is stable platform)
+- **Impact**: Critical (no live demo possible)
+- **Mitigation**:
+  - Deploy 48+ hours before demo to identify issues early
+  - Test health check endpoint before demo
+  - Have local `docker-compose` environment as backup
+  - Prepare screenshots/video as last resort
+
+**RISK-4: Performance Degradation**
+- **Description**: Response time exceeds 5s target, especially for complex queries or during high load
+- **Probability**: Low (single-user demo, optimized indexes)
+- **Impact**: Medium (poor user experience, interview impression)
+- **Mitigation**:
+  - Database indexes on frequently queried columns
+  - Result limiting (max 1000 rows)
+  - Async processing (FastAPI + OpenAI async client)
+  - Load test before demo to establish baseline
+
+**RISK-5: Integration Point Failures** (NEW - from Dependency Analysis)
+- **Description**: Critical integration gaps cause cascade failures (CORS misconfiguration → frontend blocked; missing static file serving → production 404s; env var missing → service crashes)
+- **Probability**: Medium (7 integration points identified, each has failure mode)
+- **Impact**: High (single point of failure can break entire demo)
+- **Mitigation**:
+  - Implement all 7 integration points with explicit code (not assumptions)
+  - Add integration tests for each point (CORS, static files, env vars, timeouts)
+  - Test complete dependency chain: 1.1 → 1.2 → 1.4 → 1.5 → 1.6 → 1.7 → 1.8
+  - Create smoke test script that validates all integration points before demo
+
+### Assumptions
+
+**ASSUMPTION-1: Database Size**
+- **Assumption**: 50-100 employee records sufficient for demo
+- **Validation**: Confirmed in PRD Story 1.2 (mock data requirements)
+- **If False**: Easy to scale seed script to generate more records
+
+**ASSUMPTION-2: OpenAI API Key Availability**
+- **Assumption**: User (Kaelen) has valid OpenAI API key with sufficient credits
+- **Validation**: Required for development; confirm before Epic 1 start
+- **If False**: Use Anthropic Claude API as alternative (requires code changes to llm_service.py)
+
+**ASSUMPTION-3: Single-User Demo**
+- **Assumption**: No concurrent user load testing required (job interview demo context)
+- **Validation**: Confirmed in PRD deployment intent
+- **If False**: Add rate limiting, load balancing (beyond MVP scope)
+
+**ASSUMPTION-4: No Authentication Required**
+- **Assumption**: Public access to demo app is acceptable (no login/auth)
+- **Validation**: Confirmed in PRD out-of-scope section
+- **If False**: Add basic auth middleware (1-2 days effort)
+
+### Open Questions
+
+**QUESTION-1: Schema Prompt Strategy**
+- **Question**: Should we include full schema with all 11 columns in LLM prompt, or only relevant columns per query?
+- **Options**: (A) Full schema always, (B) Dynamic schema based on query intent
+- **Decision Needed By**: Story 1.5 (LLM Integration)
+- **Recommendation**: Start with full schema (simpler), optimize later if needed
+
+**QUESTION-2: Generated SQL Display**
+- **Question**: Should generated SQL be always visible, hidden by default (toggle), or developer-only?
+- **Options**: (A) Always visible, (B) Expandable toggle, (C) Hidden in production
+- **Decision Needed By**: Story 1.8 (Frontend Integration)
+- **Recommendation**: Expandable toggle (transparency + clean UI)
+
+**QUESTION-3: Result Set Limiting**
+- **Question**: What's the max number of rows to return (prevent huge payloads)?
+- **Options**: (A) 100 rows, (B) 500 rows, (C) 1000 rows, (D) Unlimited
+- **Decision Needed By**: Story 1.7 (SQL Execution)
+- **Recommendation**: 1000 rows (reasonable for demo, prevents abuse)
+
+**QUESTION-4: Error Logging Detail**
+- **Question**: Should we log full error stack traces or sanitized error messages?
+- **Options**: (A) Full stack traces, (B) Sanitized messages only
+- **Decision Needed By**: Story 1.4 (Backend setup)
+- **Recommendation**: Full stack traces in development, sanitized in production (use `PYTHON_ENV` env var)
+
+## Test Strategy Summary
+
+### Test Levels
+
+**Unit Tests** (Python backend):
+- `validation_service.py`: Test SQL validation logic (whitelist SELECT, block dangerous keywords)
+- `llm_service.py`: Mock OpenAI responses, test prompt construction
+- `query_service.py`: Mock dependencies, test orchestration logic
+- **Framework**: pytest
+- **Coverage Target**: 80%+ for service layer
+
+**Integration Tests** (Backend):
+- Test POST `/api/query` endpoint with real database and mocked LLM
+- Test GET `/api/health` endpoint with real database connection
+- Test 4 mandatory query flows end-to-end (Stories 1.5, 1.7, 1.8)
+- **Framework**: pytest + FastAPI TestClient
+- **Coverage**: All API endpoints, all error scenarios
+
+**Frontend Tests** (React):
+- Component tests for QueryInterface, ResultsTable, ErrorDisplay
+- Test user interactions (input, submit, error display)
+- **Framework**: Vitest + React Testing Library
+- **Coverage Target**: 70%+ for components (lower priority than backend for MVP)
+
+**End-to-End Tests** (Manual for MVP):
+- Test all 4 mandatory queries in deployed environment
+- Test malicious query rejection (3 scenarios from AC3)
+- Test error handling (long query, empty query, DB failure)
+- **Tool**: Manual testing + Postman for API calls
+- **When**: Before demo day (Oct 10-11)
+
+### Test Scenarios by Acceptance Criteria
+
+| AC | Test Type | Test Scenario | Expected Result |
+|----|-----------|---------------|-----------------|
+| AC1 | Manual | Enter query in UI and submit | Query sent to backend, loading spinner shows |
+| AC2 | Integration | POST 4 mandatory queries to `/api/query` | All return valid SQL and results |
+| AC3 | Unit + Integration | Send malicious queries (DELETE, DROP, UPDATE) | All rejected with 400 error |
+| AC4 | Manual | Execute query, inspect UI | Table renders with correct headers and data |
+| AC5 | Data Validation | Query database for test data coverage | All scenarios have 2+ matching records |
+| AC6 | Manual | Attempt INSERT with app DB connection | PostgreSQL returns permission denied |
+| AC7 | Performance | Execute 10 queries, measure latency | P95 < 5 seconds |
+| AC8 | Integration | Trigger errors (long query, empty, DB down) | User-friendly error messages displayed |
+| AC9 | Manual | Run `docker-compose up` | All services start without errors |
+| AC10 | Integration | POST to `/api/query`, validate JSON schema | Response matches QueryResponse Pydantic model |
+| AC11 | Integration | GET `/api/health` | Returns 200 with status, database, timestamp fields |
+| AC12 | Manual | Execute query, inspect logs | JSON log contains query_executed event with all fields |
+
+### Test Data Requirements
+
+**Mock Employee Data** (Story 1.2):
+- 50+ total records
+- At least 5 employees hired in last 6 months
+- At least 3 Engineering employees with salary_usd > 120000
+- At least 2 employees with leave_type = 'Parental Leave'
+- At least 4 employees with manager_name = 'John Doe'
+- Diverse departments (Engineering, Marketing, Sales, HR, Finance)
+- Diverse roles (Software Engineer, Product Manager, Data Analyst, etc.)
+
+**Test Queries** (for manual testing):
+1. "Show me employees hired in the last 6 months"
+2. "List Engineering employees with salary greater than 120K"
+3. "Who is on parental leave?"
+4. "Show employees managed by John Doe"
+5. "Give me all employees in Marketing"
+6. "DELETE FROM employees WHERE department = 'Engineering'" (malicious)
+7. "DROP TABLE employees" (malicious)
+8. (501-character query) (validation failure)
+
+### Edge Cases and Error Scenarios
+
+**LLM Edge Cases**:
+- Query with ambiguous intent ("Show me high earners") → May generate SQL with arbitrary threshold
+- Query with typos ("Show emplyees in Enginering") → LLM should correct or fail gracefully
+- Query requesting non-existent columns ("Show employee hobbies") → LLM should return INVALID_REQUEST
+
+**Validation Edge Cases**:
+- SQL injection via string manipulation ("Show employees'; DROP TABLE employees; --")
+- Multi-statement injection ("SELECT * FROM employees; DELETE FROM employees")
+- Case variations ("DeLeTe FrOm EmPlOyEeS")
+
+**Database Edge Cases**:
+- Query returns 0 results → Display "No results found" message
+- Query returns 1000+ results → Limit to 1000, show warning
+- Database connection timeout → Return DB_ERROR with retry suggestion
+
+### Test Execution Plan
+
+**Phase 1: Development (During Stories 1.1-1.8)**:
+- Write unit tests alongside implementation
+- Run tests locally before committing code
+- Target: All unit tests passing before Epic 1 completion
+
+**Phase 2: Integration (After Story 1.8)**:
+- Run integration tests against local Docker Compose environment
+- Test all 4 mandatory queries + 3 malicious queries
+- Verify all acceptance criteria (AC1-AC12)
+
+**Phase 3: Deployment Validation (Oct 9-10)**:
+- Deploy to Railway
+- Run end-to-end tests in production environment
+- Measure performance (AC7)
+- Verify health check (AC11)
+
+**Phase 4: Demo Preparation (Oct 11-12)**:
+- Rehearse demo script with 4 mandatory queries
+- Test backup scenarios (local Docker if Railway fails)
+- Prepare screenshots/video as last resort
+
+### Success Metrics
+
+Epic 1 is considered **complete and demo-ready** when:
+- ✅ All 12 acceptance criteria pass
+- ✅ All 4 mandatory queries work end-to-end
+- ✅ All malicious queries are blocked
+- ✅ 80%+ unit test coverage for backend services
+- ✅ Docker Compose starts all services successfully
+- ✅ Deployed to Railway with health check passing
+- ✅ Performance target met (P95 < 5s)
+- ✅ **All 7 integration points validated** (CORS, static files, env vars, DB init order, API key, error mapping, timeouts)
+- ✅ **Dependency chain test passes** (1.1 → 1.2 → 1.4 → 1.5 → 1.6 → 1.7 → 1.8)
+
+---
+
+## Summary: Dependency Analysis Impact
+
+**Enhancements Applied**:
+- **7 Critical Integration Points** identified and implementation code provided
+- **5 New Risks** identified (RISK-5: Integration Point Failures)
+- **35 Story-Level Enhancements** across all 8 stories (5 per story average)
+- **Dependency Chain** explicitly documented with blocking impacts
+
+**Key Insights**:
+1. **Story 1.1 is CRITICAL** - Blocks all other stories; must include env var validation
+2. **Story 1.4 is HIGH-RISK** - Blocks 5 downstream stories; CORS must be configured correctly
+3. **Story 1.8 requires most integration** - Depends on 1.3 + 1.7; must handle static files + error mapping
+4. **3 Parallel Paths Possible**: Stories 1.2, 1.3, 1.4 can run simultaneously after 1.1 completes
+
+**Demo Readiness Verification**:
+```bash
+# Run this smoke test before demo to validate all dependencies
+./scripts/validate-env.sh              # Integration Point 3
+docker-compose up --build              # Integration Point 3, 4
+curl http://localhost:8000/api/health  # Integration Point 7
+curl http://localhost:5173             # Integration Point 1, 2
+# Test all 4 queries + 3 malicious queries
+```
+
+**Files Created/Modified by Dependency Analysis**:
+- `scripts/validate-env.sh` (NEW)
+- `scripts/start.sh` (ENHANCED with strict ordering)
+- `backend/app/main.py` (ADD CORS + static file serving)
+- `backend/app/services/llm_service.py` (ADD API key validation)
+- `frontend/src/services/api.js` (ADD error mapping + timeout)
+- `backend/app/api/routes.py` (ADD request timeout)
+- `backend/app/db/session.py` (ADD connection retry)
+
+---
+
+**Epic 1 Tech Spec Status**: ✅ **Enhanced with Dependency Mapping - Ready for Implementation**
+
+---
+
+## Post-Review Follow-ups
+
+These action items emerged from the Story 1.1 Senior Developer Review (2025-10-02):
+
+### High Priority (Blocks Downstream Stories)
+
+1. **Backend Module Structure Incomplete** (Story 1.1)
+   - **Issue**: Missing api/, services/, db/, utils/ subdirectories with __init__.py files
+   - **Impact**: Blocks Stories 1.4, 1.5, 1.6, 1.7 which assume modular structure exists
+   - **Action**: Create placeholder directories before proceeding with Story 1.2
+   - **Ref**: backend/app/, tech-spec lines 186-204
+
+2. **Environment Variable Parsing Security** (Story 1.1)
+   - **Issue**: validate-env.sh uses unsafe `export $(cat .env ...)` pattern vulnerable to command injection
+   - **Impact**: Security risk if .env contains malicious values
+   - **Action**: Replace with `set -a; source <(grep -v '^#' .env); set +a` pattern
+   - **Ref**: scripts/validate-env.sh:7-9
+
+3. **React Version Mismatch** (Story 1.1)
+   - **Issue**: React 19.1.1 installed but tech spec requires 18.3.1 (line 51)
+   - **Impact**: Potential breaking changes affecting Story 1.3 and 1.8 integrations
+   - **Action**: Either downgrade to 18.3.1 OR update tech spec with ADR justifying React 19
+   - **Ref**: frontend/package.json:13-14, tech-spec-epic-1.md:51
+
+### Medium Priority (Improves Quality)
+
+4. **Health Check Database Connectivity** (Story 1.1)
+   - **Issue**: /api/health returns static response, doesn't test actual DB connection
+   - **Action**: Add SQLAlchemy connection test (can be deferred to Story 1.4)
+   - **Ref**: backend/app/main.py:25-32, tech-spec-epic-1.md:249-267
+
+5. **docker-compose.override.yml.example Outdated** (Story 1.1)
+   - **Issue**: Example references port 8000 but production uses port 9000
+   - **Action**: Update port references in override example
+   - **Ref**: docker-compose.override.yml.example:13-16
+
+6. **Frontend Placeholder** (Story 1.1)
+   - **Issue**: App.jsx still has Vite default boilerplate
+   - **Action**: Replace with branded placeholder for Story 1.3 prep
+   - **Ref**: frontend/src/App.jsx:1-35
+
+### Low Priority (Future Enhancement)
+
+7. **.dockerignore Optimization** (Story 1.1)
+   - **Action**: Create .dockerignore for frontend and backend to reduce build context
+   - **Ref**: Best practices gap identified in review
+
+8. **API Key Validation** (Story 1.1)
+   - **Action**: Add format validation in validate-env.sh (check for sk- prefix)
+   - **Ref**: scripts/validate-env.sh, .env.example
+
+9. **Node.js Version Documentation** (Story 1.1)
+   - **Action**: Resolve discrepancy between Dockerfile (Node 18) and tech spec (Node 20)
+   - **Ref**: frontend/Dockerfile:1, story-1.1.md:243

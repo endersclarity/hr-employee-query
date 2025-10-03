@@ -1,0 +1,145 @@
+<story-context id="bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>2</epicId>
+    <storyId>2.4</storyId>
+    <title>Comparative Reports & Recommendations</title>
+    <status>Approved</status>
+    <generatedAt>2025-10-02</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>C:\Users\ender\.claude\projects\Amit\docs\stories\story-2.4.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>system analyst</asA>
+    <iWant>comparative analysis reports that identify weak queries and provide actionable recommendations</iWant>
+    <soThat>I can demonstrate continuous improvement capabilities and LLM quality awareness</soThat>
+    <tasks>
+      <task id="1" status="pending" ac="1">Create query_logs table</task>
+      <task id="2" status="pending" ac="1">Log queries with scores</task>
+      <task id="3" status="pending" ac="2,3">Create analysis endpoint</task>
+      <task id="4" status="pending" ac="2,3">Test report generation</task>
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+    <ac id="1" priority="critical">
+      <description>All queries logged to query_logs table with scores</description>
+      <source>tech-spec-epic-2.md AC4</source>
+      <testApproach>Execute 5 queries → SELECT * FROM query_logs shows 5 records</testApproach>
+    </ac>
+    <ac id="2" priority="critical">
+      <description>Analysis report identifies weak queries (scores &lt; 0.7)</description>
+      <source>tech-spec-epic-2.md AC5</source>
+      <testApproach>GET /api/reports/analysis → Response includes weak_queries list</testApproach>
+    </ac>
+    <ac id="3" priority="critical">
+      <description>System generates actionable recommendations</description>
+      <source>tech-spec-epic-2.md AC6</source>
+      <testApproach>Analysis report includes specific suggestions (e.g., "Add few-shot example for...")</testApproach>
+    </ac>
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/tech-spec-epic-2.md" section="Data Models and Contracts">
+        <title>query_logs table schema</title>
+        <snippet>CREATE TABLE query_logs (id SERIAL PRIMARY KEY, natural_language_query TEXT NOT NULL, generated_sql TEXT NOT NULL, faithfulness_score DECIMAL(3, 2), answer_relevance_score DECIMAL(3, 2), context_precision_score DECIMAL(3, 2), result_count INTEGER, execution_time_ms INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);</snippet>
+        <reason>Defines exact table structure for Task 1</reason>
+      </doc>
+      <doc path="docs/tech-spec-epic-2.md" section="APIs and Interfaces">
+        <title>GET /api/reports/analysis endpoint spec</title>
+        <snippet>Response includes total_queries, average_scores, weak_queries (scores &lt; 0.7), and recommendations list</snippet>
+        <reason>API contract for Task 3</reason>
+      </doc>
+      <doc path="docs/tech-spec-epic-2.md" section="Performance">
+        <title>Performance targets</title>
+        <snippet>Ragas adds 500-850ms overhead, total &lt; 5s</snippet>
+        <reason>Performance constraints to maintain</reason>
+      </doc>
+    </docs>
+    <code>
+      <artifact path="backend/app/db/models.py" kind="model" lines="1-27">
+        <symbol>Employee</symbol>
+        <reason>Existing ORM pattern - QueryLog model should follow same pattern (SQLAlchemy declarative_base)</reason>
+      </artifact>
+      <artifact path="backend/app/services/query_service.py" kind="service" lines="27-151">
+        <symbol>execute_query</symbol>
+        <reason>This is where query logging should be integrated (after line 69 ragas_service.evaluate)</reason>
+      </artifact>
+      <artifact path="backend/app/services/ragas_service.py" kind="service" lines="39-102">
+        <symbol>evaluate</symbol>
+        <reason>Returns Dict[str, float] with faithfulness, answer_relevance, context_precision - these scores must be logged</reason>
+      </artifact>
+      <artifact path="backend/app/api/models.py" kind="pydantic_model" lines="17-28">
+        <symbol>QueryResponse</symbol>
+        <reason>Contains ragas_scores field - used to pass data to logging layer</reason>
+      </artifact>
+    </code>
+    <dependencies>
+      <python>
+        <package name="sqlalchemy" version="2.x">ORM for QueryLog model</package>
+        <package name="alembic" version="1.x">Database migrations for query_logs table</package>
+        <package name="fastapi" version="0.x">API framework for /api/reports/analysis endpoint</package>
+        <package name="pydantic" version="2.x">AnalysisReport response model</package>
+        <package name="structlog" version="latest">Logging (already in use)</package>
+      </python>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint type="architectural">Follow existing service layer pattern - create report_service.py alongside query_service.py and ragas_service.py</constraint>
+    <constraint type="data">Use SQLAlchemy ORM models consistent with Employee model pattern in backend/app/db/models.py</constraint>
+    <constraint type="migration">Create Alembic migration file following pattern from backend/alembic/versions/001_create_employees_table.py</constraint>
+    <constraint type="api">Add routes to backend/app/api/routes.py following existing pattern</constraint>
+    <constraint type="performance">Maintain &lt; 5s total response time (query logging should add &lt; 50ms)</constraint>
+    <constraint type="error_handling">Follow graceful degradation pattern from ragas_service.py (return None on failure, don't block)</constraint>
+  </constraints>
+
+  <interfaces>
+    <interface name="query_service.execute_query" kind="function" path="backend/app/services/query_service.py:27">
+      <signature>async def execute_query(nl_query: str) -> QueryResponse</signature>
+      <usage>After line 69 (ragas evaluation), add query logging call before building QueryResponse</usage>
+    </interface>
+    <interface name="get_db_session" kind="function" path="backend/app/db/session.py">
+      <signature>def get_db_session() -> Session</signature>
+      <usage>Use for database operations in report_service and query logging</usage>
+    </interface>
+    <interface name="QueryResponse" kind="pydantic_model" path="backend/app/api/models.py:17">
+      <signature>QueryResponse(success, query, generated_sql, results, result_count, execution_time_ms, ragas_scores)</signature>
+      <usage>ragas_scores field contains Dict[str, float] with scores to log</usage>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+      Project uses pytest with async support (pytest-asyncio). Test files in backend/tests/ follow pattern: test_{module_name}.py. Tests use mocking for external dependencies (databases, LLM API calls). Integration tests in backend/tests/integration/. All tests follow AAA pattern (Arrange, Act, Assert).
+    </standards>
+    <locations>
+      <location>backend/tests/test_query_service.py</location>
+      <location>backend/tests/test_ragas_service.py</location>
+      <location>backend/tests/integration/</location>
+    </locations>
+    <ideas>
+      <test ac="1">
+        <description>Test QueryLog model creation and persistence</description>
+        <approach>Create QueryLog instance, save to DB, query back, assert all fields match</approach>
+      </test>
+      <test ac="1">
+        <description>Test query logging integration in execute_query</description>
+        <approach>Mock ragas_service, execute query, verify query_logs table has new record with correct scores</approach>
+      </test>
+      <test ac="2">
+        <description>Test weak query identification in analysis report</description>
+        <approach>Seed query_logs with mix of scores, call analysis endpoint, verify weak_queries includes only scores &lt; 0.7</approach>
+      </test>
+      <test ac="3">
+        <description>Test recommendation generation logic</description>
+        <approach>Mock query_logs with patterns, verify recommendations are actionable and specific</approach>
+      </test>
+      <test ac="2,3">
+        <description>Integration test for /api/reports/analysis endpoint</description>
+        <approach>Execute 10 test queries, call GET /api/reports/analysis, verify response structure matches spec</approach>
+      </test>
+    </ideas>
+  </tests>
+</story-context>

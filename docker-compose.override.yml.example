@@ -1,0 +1,27 @@
+# Docker Compose Override Example
+# Copy this file to docker-compose.override.yml to customize your local environment
+# Usage: cp docker-compose.override.yml.example docker-compose.override.yml
+
+version: '3.8'
+
+services:
+  # Example: Override frontend port if 5173 is in use
+  # frontend:
+  #   ports:
+  #     - "3000:5173"
+
+  # Example: Override backend port if 9000 is in use
+  # backend:
+  #   ports:
+  #     - "9001:9000"
+
+  # Example: Override PostgreSQL port if 5432 is in use
+  # db:
+  #   ports:
+  #     - "5433:5432"
+
+  # Example: Add additional environment variables
+  # backend:
+  #   environment:
+  #     - DEBUG=true
+  #     - ADDITIONAL_VAR=value

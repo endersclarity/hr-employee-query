@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: hr_query_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hr_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: hr_query_backend
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/hr_db
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PYTHON_ENV=${PYTHON_ENV:-development}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5173}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - READONLY_DB_PASSWORD=${READONLY_DB_PASSWORD:-readonly_secure_pass_2025}
+    ports:
+      - "9000:8000"
+    volumes:
+      - ./backend:/app
+      - ./scripts:/scripts
+      - ./frontend/dist:/app/frontend/dist
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    command: bash /scripts/start.sh
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: hr_query_frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.pnpm-store
+    environment:
+      - VITE_API_URL=http://localhost:9000
+    depends_on:
+      - backend
+    command: sh -c "pnpm run dev -- --host 0.0.0.0"
+
+volumes:
+  postgres_data:

@@ -1,0 +1,4 @@
+# Overview
+
+Epic 1 delivers the foundational full-stack web application that enables natural language querying of HR employee records. This epic encompasses the complete user journey from query input through LLM-powered SQL generation, secure query validation, database execution, and results display. The system converts natural language queries (e.g., "Show me employees in Engineering with salary greater than 120K") into validated SQL statements, executes them against a PostgreSQL database, and returns results in a user-friendly tabular format. Built using React + Tailwind (frontend) and FastAPI + Python (backend), this epic establishes the core infrastructure and functionality that Epic 2 will later evaluate using Ragas metrics.
+

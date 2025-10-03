@@ -1,0 +1,23 @@
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-dotenv==1.0.0
+pydantic==2.5.3
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.25
+alembic==1.13.1
+pytest==7.4.3
+pytest-mock==3.12.0
+pytest-asyncio==0.21.1
+httpx==0.26.0
+structlog==24.1.0
+sqlparse==0.4.4
+
+# Ragas evaluation stack - pinned versions for compatibility
+ragas==0.1.21
+langchain==0.2.16
+langchain-openai==0.1.25
+langchain-community==0.2.16
+langchain-core==0.2.40
+openai==1.54.5
+datasets==2.14.0
+pyarrow==16.1.0
