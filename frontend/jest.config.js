@@ -8,7 +8,7 @@ export default {
     '^.+\\.jsx?$': 'babel-jest',
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(react-error-boundary)/)',
+    'node_modules/(?!react-error-boundary)',
   ],
   testMatch: [
     '**/__tests__/**/*.[jt]s?(x)',

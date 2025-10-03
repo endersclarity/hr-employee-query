@@ -4,6 +4,10 @@ import App from '../App';
 
 // Mock the API module with shared mock
 jest.mock('../services/api', () => require('./__mocks__/api'));
+// Mock ErrorBoundary to avoid Jest/ESM issues
+jest.mock('react-error-boundary', () => ({
+  ErrorBoundary: ({ children }) => children,
+}));
 
 describe('App', () => {
   test('renders application title', () => {

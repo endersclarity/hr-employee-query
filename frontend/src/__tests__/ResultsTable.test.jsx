@@ -109,7 +109,7 @@ describe('ResultsTable', () => {
 
     const dataRows = container.querySelectorAll('tbody tr');
     dataRows.forEach(row => {
-      expect(row).toHaveClass('hover:bg-gray-50');
+      expect(row).toHaveClass('hover:bg-zinc-800/50');
     });
   });
 

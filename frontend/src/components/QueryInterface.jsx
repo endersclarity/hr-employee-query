@@ -36,12 +36,12 @@ export default function QueryInterface({ onSubmit, isLoading, onTimeout }) {
   }, [isLoading, onTimeout]);
 
   return (
-    <form onSubmit={handleSubmit} className="w-full max-w-2xl">
+    <form onSubmit={handleSubmit} className="w-full max-w-2xl bg-zinc-900 border-2 border-zinc-700 rounded-lg p-6">
       <textarea
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Enter your query (e.g., 'Show me employees in Engineering with salary > 120K')"
-        className="w-full p-4 border rounded-lg"
+        className="w-full p-4 bg-zinc-950 border-2 border-zinc-700 text-white placeholder-zinc-500 rounded-lg"
         rows={3}
         maxLength={500}
         disabled={isLoading}
@@ -50,13 +50,13 @@ export default function QueryInterface({ onSubmit, isLoading, onTimeout }) {
       />
       <div className="flex justify-between items-center mt-2">
         {/* Character counter (Subtask 1.2) */}
-        <span id="char-counter" className="text-sm text-gray-600">{query.length}/500</span>
-        {error && <span className="text-sm text-red-600" role="alert" aria-live="assertive">{error}</span>}
+        <span id="char-counter" className="text-sm text-zinc-500">{query.length}/500</span>
+        {error && <span className="text-sm text-red-400" role="alert" aria-live="assertive">{error}</span>}
       </div>
       <button
         type="submit"
         disabled={isLoading}
-        className="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+        className="mt-4 px-6 py-2 bg-blue-600 border-2 border-blue-500 text-white rounded-lg hover:bg-blue-700 disabled:bg-zinc-700"
       >
         {isLoading ? 'Processing...' : 'Submit Query'}
       </button>

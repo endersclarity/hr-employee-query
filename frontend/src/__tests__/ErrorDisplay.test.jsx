@@ -31,10 +31,10 @@ describe('ErrorDisplay', () => {
     const { container } = render(<ErrorDisplay error="Test error" />);
     const errorDiv = container.firstChild;
 
-    expect(errorDiv).toHaveClass('bg-red-50');
-    expect(errorDiv).toHaveClass('border');
-    expect(errorDiv).toHaveClass('border-red-300');
-    expect(errorDiv).toHaveClass('text-red-800');
+    expect(errorDiv).toHaveClass('bg-zinc-900');
+    expect(errorDiv).toHaveClass('border-2');
+    expect(errorDiv).toHaveClass('border-red-500/30');
+    expect(errorDiv).toHaveClass('text-red-400');
     expect(errorDiv).toHaveClass('px-4');
     expect(errorDiv).toHaveClass('py-3');
     expect(errorDiv).toHaveClass('rounded-lg');

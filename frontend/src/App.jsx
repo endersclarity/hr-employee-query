@@ -41,10 +41,10 @@ export default function App() {
 
   return (
     <ErrorBoundary
-      fallback={<div className="min-h-screen flex items-center justify-center bg-gray-50">
+      fallback={<div className="min-h-screen flex items-center justify-center bg-zinc-950">
         <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h1>
-          <p className="text-gray-600 mb-4">Please refresh the page to try again.</p>
+          <h1 className="text-2xl font-bold text-red-400 mb-4">Something went wrong</h1>
+          <p className="text-zinc-400 mb-4">Please refresh the page to try again.</p>
           <button
             onClick={() => window.location.reload()}
             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -54,9 +54,9 @@ export default function App() {
         </div>
       </div>}
     >
-      <div className="min-h-screen bg-gray-50 py-8 px-4">
+      <div className="min-h-screen bg-zinc-950 py-8 px-4">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold text-gray-900 mb-8">
+          <h1 className="text-3xl font-bold text-white mb-8">
             HR Employee Query System
           </h1>
 
@@ -68,7 +68,7 @@ export default function App() {
             {!isLoading && !error && results.length > 0 && (
               <>
                 {generatedSQL && (
-                  <div className="mb-4 bg-gray-100 rounded-lg p-4">
+                  <div className="mb-4 bg-zinc-900 rounded-lg p-4">
                     <button
                       onClick={() => setShowSQL(!showSQL)}
                       className="text-sm text-blue-600 hover:text-blue-800 font-medium"
@@ -76,7 +76,7 @@ export default function App() {
                       {showSQL ? '▼' : '▶'} Generated SQL
                     </button>
                     {showSQL && (
-                      <pre className="mt-2 text-sm text-gray-700 overflow-x-auto">
+                      <pre className="mt-2 text-sm text-emerald-400 font-mono overflow-x-auto">
                         {generatedSQL}
                       </pre>
                     )}

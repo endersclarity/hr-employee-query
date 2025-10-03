@@ -40,7 +40,7 @@ describe('LoadingSpinner', () => {
     const text = screen.getByText('Processing query...');
 
     expect(text).toHaveClass('ml-3');
-    expect(text).toHaveClass('text-gray-600');
+    expect(text).toHaveClass('text-zinc-300');
   });
 
   test('renders spinner and text as siblings', () => {
