@@ -1,0 +1,47 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+venv
+backend/venv
+.pytest_cache
+
+# Node
+frontend/node_modules
+frontend/dist
+node_modules
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode
+.idea
+.cursor
+.claude
+.gemini
+
+# Git
+.git
+.github
+
+# Logs
+*.log
+build.log
+
+# Database
+*.sqlite
+*.db
+
+# OS
+.DS_Store
+
+# Documentation
+docs/
+bmad/
+scripts/
+*.md
