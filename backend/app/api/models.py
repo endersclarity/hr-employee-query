@@ -25,7 +25,9 @@ class QueryResponse(BaseModel):
     execution_time_ms: int = 0
     error: str | None = None
     error_type: str | None = None  # 'VALIDATION_ERROR', 'LLM_ERROR', 'DB_ERROR'
-    ragas_scores: Dict[str, float] | None = None  # Ragas evaluation scores
+    query_log_id: int | None = None  # ID for polling RAGAS scores
+    evaluation_status: str | None = None  # 'pending', 'evaluating', 'completed', 'failed'
+    ragas_scores: Dict[str, float] | None = None  # Ragas evaluation scores (populated after async evaluation)
 
 
 class HealthResponse(BaseModel):

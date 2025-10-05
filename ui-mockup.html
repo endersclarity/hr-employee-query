@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HR Employee Query System - Dark Mode Mockup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-zinc-950 min-h-screen">
+
+    <!-- Header -->
+    <div class="bg-zinc-900 border-b border-zinc-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold text-white">
+                        HR Employee Query System
+                    </h1>
+                    <p class="text-zinc-400 mt-1">Ask questions in natural language</p>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span class="px-3 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-sm font-medium">
+                        ✓ Connected
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+
+        <!-- Query Input Card -->
+        <div class="bg-zinc-900 border-2 border-zinc-700 overflow-hidden mb-10">
+            <div class="p-8">
+                <label class="block text-sm font-semibold text-zinc-300 mb-4">
+                    Enter your query
+                </label>
+                <textarea
+                    class="w-full px-4 py-3 bg-zinc-950 border-2 border-zinc-700 text-white placeholder-zinc-500 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all resize-none"
+                    rows="3"
+                    placeholder="e.g., Show me all employees in Engineering with salary above $120,000"
+                >Show me employees on parental leave</textarea>
+                <div class="flex items-center justify-between mt-6">
+                    <span class="text-sm text-zinc-500">35/500 characters</span>
+                    <button class="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors border-2 border-blue-500">
+                        Submit Query
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Example Queries Card -->
+        <div class="bg-zinc-900 border-2 border-zinc-700 overflow-hidden mb-10">
+            <div class="px-8 py-6 border-b-2 border-zinc-700">
+                <h3 class="text-lg font-semibold text-white">💡 Example Queries</h3>
+            </div>
+            <div class="p-8">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <button class="text-left px-6 py-4 bg-zinc-950 hover:bg-zinc-800 transition-colors border-2 border-zinc-800 hover:border-zinc-600 text-zinc-300">
+                        <span class="text-blue-400 font-medium">→</span> Show all Engineering employees
+                    </button>
+                    <button class="text-left px-6 py-4 bg-zinc-950 hover:bg-zinc-800 transition-colors border-2 border-zinc-800 hover:border-zinc-600 text-zinc-300">
+                        <span class="text-blue-400 font-medium">→</span> Who earns more than $120k?
+                    </button>
+                    <button class="text-left px-6 py-4 bg-zinc-950 hover:bg-zinc-800 transition-colors border-2 border-zinc-800 hover:border-zinc-600 text-zinc-300">
+                        <span class="text-blue-400 font-medium">→</span> List employees on parental leave
+                    </button>
+                    <button class="text-left px-6 py-4 bg-zinc-950 hover:bg-zinc-800 transition-colors border-2 border-zinc-800 hover:border-zinc-600 text-zinc-300">
+                        <span class="text-blue-400 font-medium">→</span> Show John Doe's team
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- SQL Preview Card -->
+        <div class="bg-zinc-900 border-2 border-zinc-700 overflow-hidden mb-10">
+            <div class="px-8 py-6 border-b-2 border-zinc-700 flex items-center justify-between">
+                <h3 class="text-lg font-semibold text-white">Generated SQL</h3>
+                <button class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors border-2 border-zinc-700">
+                    Copy
+                </button>
+            </div>
+            <div class="p-8 bg-black">
+                <pre class="text-emerald-400 font-mono text-sm overflow-x-auto">SELECT * FROM employees WHERE leave_type = 'Parental Leave'</pre>
+            </div>
+        </div>
+
+        <!-- Results Table -->
+        <div class="bg-zinc-900 border-2 border-zinc-700 overflow-hidden mb-10">
+            <div class="px-8 py-6 border-b-2 border-zinc-700">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-semibold text-white">
+                        📊 Query Results <span class="text-sm font-normal text-zinc-400">(2 employees)</span>
+                    </h3>
+                    <button class="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border-2 border-zinc-700 text-zinc-300 text-sm font-medium transition-colors">
+                        Export CSV
+                    </button>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-black border-b-2 border-zinc-700">
+                        <tr>
+                            <th class="px-6 py-5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">ID</th>
+                            <th class="px-6 py-5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">Name</th>
+                            <th class="px-6 py-5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">Department</th>
+                            <th class="px-6 py-5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">Role</th>
+                            <th class="px-6 py-5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">Status</th>
+                            <th class="px-6 py-5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">Leave Type</th>
+                            <th class="px-6 py-5 text-left text-xs font-semibold text-zinc-400 uppercase tracking-wider">Salary</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y-2 divide-zinc-800">
+                        <tr class="hover:bg-zinc-800/50 transition-colors">
+                            <td class="px-6 py-5 whitespace-nowrap text-sm text-zinc-300">11</td>
+                            <td class="px-6 py-5 whitespace-nowrap">
+                                <div class="flex items-center">
+                                    <div class="h-10 w-10 bg-blue-600 flex items-center justify-center text-white font-semibold border-2 border-blue-500">
+                                        IT
+                                    </div>
+                                    <div class="ml-4">
+                                        <div class="text-sm font-medium text-white">Isabella Thomas</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-5 whitespace-nowrap text-sm text-zinc-400">Marketing</td>
+                            <td class="px-6 py-5 whitespace-nowrap text-sm text-zinc-400">Senior Marketing Manager</td>
+                            <td class="px-6 py-5 whitespace-nowrap">
+                                <span class="px-3 py-1 bg-orange-500/20 text-orange-400 border-2 border-orange-500/30 text-xs font-medium">On Leave</span>
+                            </td>
+                            <td class="px-6 py-5 whitespace-nowrap">
+                                <span class="px-3 py-1 bg-blue-500/20 text-blue-400 border-2 border-blue-500/30 text-xs font-medium">Parental Leave</span>
+                            </td>
+                            <td class="px-6 py-5 whitespace-nowrap text-sm font-semibold text-white">$98,000</td>
+                        </tr>
+                        <tr class="hover:bg-zinc-800/50 transition-colors">
+                            <td class="px-6 py-5 whitespace-nowrap text-sm text-zinc-300">12</td>
+                            <td class="px-6 py-5 whitespace-nowrap">
+                                <div class="flex items-center">
+                                    <div class="h-10 w-10 bg-emerald-600 flex items-center justify-center text-white font-semibold border-2 border-emerald-500">
+                                        DJ
+                                    </div>
+                                    <div class="ml-4">
+                                        <div class="text-sm font-medium text-white">Daniel Jackson</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-5 whitespace-nowrap text-sm text-zinc-400">Engineering</td>
+                            <td class="px-6 py-5 whitespace-nowrap text-sm text-zinc-400">Software Engineer</td>
+                            <td class="px-6 py-5 whitespace-nowrap">
+                                <span class="px-3 py-1 bg-orange-500/20 text-orange-400 border-2 border-orange-500/30 text-xs font-medium">On Leave</span>
+                            </td>
+                            <td class="px-6 py-5 whitespace-nowrap">
+                                <span class="px-3 py-1 bg-blue-500/20 text-blue-400 border-2 border-blue-500/30 text-xs font-medium">Parental Leave</span>
+                            </td>
+                            <td class="px-6 py-5 whitespace-nowrap text-sm font-semibold text-white">$110,000</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Quality Metrics Card -->
+        <div class="bg-zinc-900 border-2 border-zinc-700 overflow-hidden">
+            <div class="px-8 py-6 border-b-2 border-zinc-700">
+                <h3 class="text-lg font-semibold text-white">📈 Query Quality Metrics (RAGAS)</h3>
+            </div>
+            <div class="p-8">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div class="text-center p-6 bg-zinc-950 border-2 border-zinc-800">
+                        <div class="text-3xl font-bold text-red-400">0.00</div>
+                        <div class="text-sm text-zinc-400 mt-2">Faithfulness</div>
+                        <div class="w-full bg-zinc-800 h-3 mt-4 border border-zinc-700">
+                            <div class="bg-red-500 h-full" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="text-center p-6 bg-zinc-950 border-2 border-zinc-800">
+                        <div class="text-3xl font-bold text-emerald-400">0.90</div>
+                        <div class="text-sm text-zinc-400 mt-2">Answer Relevance</div>
+                        <div class="w-full bg-zinc-800 h-3 mt-4 border border-zinc-700">
+                            <div class="bg-emerald-500 h-full" style="width: 90%"></div>
+                        </div>
+                    </div>
+                    <div class="text-center p-6 bg-zinc-950 border-2 border-zinc-800">
+                        <div class="text-3xl font-bold text-blue-400">1.00</div>
+                        <div class="text-sm text-zinc-400 mt-2">Context Utilization</div>
+                        <div class="w-full bg-zinc-800 h-3 mt-4 border border-zinc-700">
+                            <div class="bg-blue-500 h-full" style="width: 100%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 mt-12">
+        <div class="text-center text-zinc-600 text-sm">
+            <p>Powered by OpenAI GPT-4 • PostgreSQL • FastAPI • React</p>
+        </div>
+    </div>
+
+</body>
+</html>

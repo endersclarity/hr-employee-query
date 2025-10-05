@@ -33,6 +33,7 @@ class QueryLog(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     natural_language_query = Column(String, nullable=False)
     generated_sql = Column(String, nullable=False)
+    evaluation_status = Column(String(20), server_default=text("'pending'"), nullable=False)  # 'pending', 'evaluating', 'completed', 'failed'
     faithfulness_score = Column(DECIMAL(3, 2), nullable=True)
     answer_relevance_score = Column(DECIMAL(3, 2), nullable=True)
     context_precision_score = Column(DECIMAL(3, 2), nullable=True)

@@ -25,16 +25,21 @@ def _serialize_value(value):
     return value
 
 
-def _log_query(nl_query: str, sql: str, results: list, ragas_scores: dict | None, elapsed_ms: int) -> None:
+def _log_query(nl_query: str, sql: str, results: list, elapsed_ms: int) -> int | None:
     """
-    Log query execution to query_logs table with Ragas scores.
+    Log query execution to query_logs table.
+
+    RAGAS scores are calculated asynchronously in background task.
+    Initial status is 'pending', will be updated to 'evaluating' -> 'completed'/'failed'.
 
     Args:
         nl_query: Natural language query
         sql: Generated SQL
         results: Query results
-        ragas_scores: Dictionary with faithfulness, answer_relevance, context_precision (or None)
         elapsed_ms: Execution time in milliseconds
+
+    Returns:
+        Query log ID for background task reference, or None if logging failed
     """
     try:
         db = get_db_session()
@@ -42,20 +47,20 @@ def _log_query(nl_query: str, sql: str, results: list, ragas_scores: dict | None
             query_log = QueryLog(
                 natural_language_query=nl_query,
                 generated_sql=sql,
-                faithfulness_score=ragas_scores.get('faithfulness') if ragas_scores else None,
-                answer_relevance_score=ragas_scores.get('answer_relevance') if ragas_scores else None,
-                context_precision_score=ragas_scores.get('context_precision') if ragas_scores else None,
+                evaluation_status='pending',  # Will be updated by background task
                 result_count=len(results),
                 execution_time_ms=elapsed_ms
             )
             db.add(query_log)
             db.commit()
-            logger.info("query_logged", query_log_id=query_log.id)
+            query_log_id = query_log.id
+            logger.info("query_logged", query_log_id=query_log_id, evaluation_status='pending')
+            return query_log_id
         finally:
             db.close()
     except Exception as e:
         logger.error("query_logging_failed", error=str(e))
-        # Don't raise - logging failure shouldn't block query response
+        return None  # Don't block query response on logging failure
 
 
 async def execute_query(nl_query: str) -> QueryResponse:
@@ -99,13 +104,11 @@ async def execute_query(nl_query: str) -> QueryResponse:
                 logger.warning("result_set_truncated", count=len(results))
                 results = results[:1000]
 
-            # Calculate Ragas metrics (AC1, AC2)
-            ragas_scores = await ragas_service.evaluate(nl_query, sql, results)
-
             elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
 
-            # Log query to query_logs table (AC1)
-            _log_query(nl_query, sql, results, ragas_scores, elapsed_ms)
+            # Log query to query_logs table with 'pending' status
+            # RAGAS evaluation will run in background task
+            query_log_id = _log_query(nl_query, sql, results, elapsed_ms)
 
             return QueryResponse(
                 success=True,
@@ -114,7 +117,8 @@ async def execute_query(nl_query: str) -> QueryResponse:
                 results=results,
                 result_count=len(results),
                 execution_time_ms=elapsed_ms,
-                ragas_scores=ragas_scores  # NEW
+                query_log_id=query_log_id,  # For background task
+                evaluation_status='pending'  # RAGAS scores will be calculated async
             )
 
         finally:

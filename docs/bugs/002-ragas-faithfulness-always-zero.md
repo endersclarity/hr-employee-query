@@ -851,9 +851,9 @@ Recommendations:
 
 ---
 
-**Status**: 🔴 PRODUCTION BROKEN - Rollback required immediately
-**Production Status**: ❌ TIMEOUT on all queries
-**User Request**: Update documentation before proceeding with party mode
+**Status**: ✅ ASYNC IMPLEMENTATION READY - Pending deployment
+**Production Status**: ✅ STABLE (Rolled back to 494dc1a)
+**Next Action**: Deploy async RAGAS implementation to GitHub → Railway
 
 ---
 
@@ -1079,4 +1079,116 @@ curl -X POST http://localhost:8000/api/query \
 
 ---
 
-**Status**: 🔴 SESSION PAUSED - Production broken, documentation updated, awaiting rollback
+**Status**: ✅ SESSION COMPLETE - Async implementation ready for deployment
+
+---
+
+## ASYNC RAGAS IMPLEMENTATION - October 5, 2025 (22:30 UTC)
+
+### Solution: FastAPI BackgroundTasks Pattern
+
+**Problem Identified**:
+- Synchronous RAGAS evaluation blocks query response
+- Takes 5-10 seconds per query (OpenAI API calls)
+- Caused production timeouts when natural language formatting was added
+
+**Solution Implemented**:
+- Move RAGAS evaluation to FastAPI BackgroundTasks
+- Return query results immediately with `evaluation_status='pending'`
+- Background task updates database when scores complete
+- Frontend polls `/api/query/{query_log_id}` for score updates
+
+### Changes Made
+
+**1. Database Migration** (`004_add_evaluation_status.py`)
+```sql
+ALTER TABLE query_logs
+ADD COLUMN evaluation_status VARCHAR(20) NOT NULL DEFAULT 'pending';
+CREATE INDEX idx_evaluation_status ON query_logs(evaluation_status);
+```
+
+**2. Models** (`app/db/models.py`)
+- Added `evaluation_status` field to QueryLog model
+- Values: 'pending', 'evaluating', 'completed', 'failed'
+
+**3. RAGAS Service** (`app/services/ragas_service.py`)
+- Added `evaluate_and_update_async()` function
+- Handles: status updates, score calculation, error handling, database commits
+
+**4. Query Service** (`app/services/query_service.py`)
+- Removed blocking RAGAS call from `execute_query()`
+- Modified `_log_query()` to return query_log_id
+- Query response now includes `query_log_id` and `evaluation_status`
+
+**5. API Routes** (`app/api/routes.py`)
+- Updated `/api/query` to use BackgroundTasks
+- Added polling endpoint: `GET /api/query/{query_log_id}`
+- Returns: evaluation_status + ragas_scores (when complete)
+
+**6. Response Model** (`app/api/models.py`)
+- Added `query_log_id` field
+- Added `evaluation_status` field
+- Kept `ragas_scores` (populated by frontend after polling)
+
+### Expected Behavior After Deployment
+
+**Query Flow**:
+1. User submits query → Results return in < 3 seconds
+2. Frontend shows results + "Evaluating..." status
+3. Background task calculates RAGAS scores (5-10s)
+4. Frontend polls every 2 seconds for status
+5. When status='completed', frontend displays scores
+
+**Benefits**:
+- ✅ No query timeouts (results return immediately)
+- ✅ RAGAS still evaluates (in background)
+- ✅ Better UX (progressive enhancement)
+- ✅ Fail-safe (RAGAS failure doesn't block queries)
+
+### Deployment Strategy
+
+**1. Commit to GitHub**:
+```bash
+git add .
+git commit -m "feat: Implement async RAGAS evaluation (Bug #002 - Part 3)"
+git push origin master
+```
+
+**2. Railway Auto-Deploys**:
+- Migration runs automatically via start script
+- Background workers start with FastAPI
+- No manual intervention needed
+
+**3. Verification Tests**:
+- Query "list all departments" → Verify < 3s response
+- Check `evaluation_status` field in response
+- Poll `/api/query/{id}` → Verify scores appear
+- Confirm no timeouts on 10 rapid queries
+
+**4. Rollback Plan** (if needed):
+```bash
+git revert HEAD
+git push origin master
+# Railway auto-deploys previous working version
+```
+
+### Files Modified
+
+**Backend**:
+- `backend/app/db/models.py` - Added evaluation_status
+- `backend/alembic/versions/004_add_evaluation_status.py` - Migration
+- `backend/app/services/ragas_service.py` - Async evaluation function
+- `backend/app/services/query_service.py` - Removed blocking RAGAS
+- `backend/app/api/routes.py` - BackgroundTasks + polling endpoint
+- `backend/app/api/models.py` - Updated QueryResponse model
+
+**Documentation**:
+- `docs/bugs/002-ragas-faithfulness-always-zero.md` - Implementation log
+
+**Frontend** (Next Phase):
+- `frontend/src/services/api.js` - Add polling logic
+- `frontend/src/components/QueryInterface.jsx` - Display "Evaluating..." state
+
+---
+
+**Status**: ✅ Backend implementation complete - Ready to commit and deploy

@@ -169,3 +169,71 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
     except Exception as e:
         logger.error("ragas_evaluation_failed", error=str(e))
         return None  # Return None, don't block query
+
+
+async def evaluate_and_update_async(query_id: int, nl_query: str, sql: str, results: list):
+    """
+    Background task to evaluate RAGAS scores and update database.
+
+    This runs asynchronously after query results are returned to the user.
+    Updates the query_logs table with evaluation_status and scores.
+
+    Args:
+        query_id: ID of the query log entry to update
+        nl_query: Natural language query string
+        sql: Generated SQL query
+        results: Query results as list of dicts
+    """
+    from app.db.database import get_db_session
+    from app.db.models import QueryLog
+
+    db = None
+    try:
+        # Update status to 'evaluating'
+        db = get_db_session()
+        query_log = db.query(QueryLog).filter(QueryLog.id == query_id).first()
+
+        if not query_log:
+            logger.error("ragas_async_query_not_found", query_id=query_id)
+            return
+
+        query_log.evaluation_status = 'evaluating'
+        db.commit()
+
+        logger.info("ragas_async_started", query_id=query_id)
+
+        # Run RAGAS evaluation
+        scores = await evaluate(nl_query, sql, results)
+
+        if scores is None:
+            # Evaluation failed
+            query_log.evaluation_status = 'failed'
+            db.commit()
+            logger.warning("ragas_async_failed", query_id=query_id)
+            return
+
+        # Update database with scores
+        query_log.faithfulness_score = scores['faithfulness']
+        query_log.answer_relevance_score = scores['answer_relevance']
+        query_log.context_utilization_score = scores['context_utilization']
+        query_log.evaluation_status = 'completed'
+        db.commit()
+
+        logger.info("ragas_async_completed",
+            query_id=query_id,
+            faithfulness=scores['faithfulness'],
+            answer_relevance=scores['answer_relevance'],
+            context_utilization=scores['context_utilization']
+        )
+
+    except Exception as e:
+        logger.error("ragas_async_error", query_id=query_id, error=str(e))
+        if db and query_log:
+            try:
+                query_log.evaluation_status = 'failed'
+                db.commit()
+            except:
+                pass
+    finally:
+        if db:
+            db.close()
