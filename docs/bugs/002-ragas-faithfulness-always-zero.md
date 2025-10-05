@@ -851,9 +851,9 @@ Recommendations:
 
 ---
 
-**Status**: ✅ RESOLVED - All three metrics working (Final Fix: Commit 894b9bf)
-**Production Status**: ✅ DEPLOYED - Awaiting verification
-**Final Resolution Date**: October 5, 2025 23:00 UTC
+**Status**: 🟡 IN PROGRESS - Answer format fix deployed (Commit eff636a)
+**Production Status**: 🔄 DEPLOYING - Railway auto-deploy in progress
+**Latest Update**: October 5, 2025 23:10 UTC
 
 ---
 
@@ -1444,5 +1444,111 @@ for i, row in enumerate(results[:10], 1):
 
 ---
 
-**Final Status**: ✅ ALL THREE FIXES DEPLOYED - Awaiting production verification
+**Status Update**: 🔄 FOURTH FIX DEPLOYED (Commit eff636a) - Answer Format Improvement
+
+---
+
+## 🔵 ANSWER FORMAT FIX #4 - October 5, 2025 (23:10 UTC)
+
+### Issue Discovered
+After deploying commit `894b9bf` (database results as context), faithfulness still returned 0.0 with error:
+```
+"No statements were generated from the answer."
+```
+
+Production logs (query #34-36) showed:
+- ✅ Answer relevance: 0.86-0.87 (working)
+- ✅ Context utilization: 0.99-1.0 (working!)
+- ❌ Faithfulness: 0.0 (RAGAS cannot extract statements)
+
+### Root Cause: Answer Format Not Claim-Based
+
+**Previous Format (Lines 108-119)**:
+```python
+sentences = []
+for row in limited_results:
+    parts = [f"{key} is {value}" for key, value in row.items() if value is not None]
+    if parts:
+        sentences.append("There is a record where " + ", ".join(parts) + ".")
+formatted_results = " ".join(sentences)
+```
+
+**Output Example**:
+```
+"There is a record where department is Engineering. There is a record where department is Sales."
+```
+
+**Why This Failed**:
+1. RAGAS faithfulness extracts **factual claims** from answers
+2. "There is a record where X is Y" is a meta-statement about database structure
+3. RAGAS needs direct claims like "The department is Engineering"
+4. Meta-statements are too complex for RAGAS claim extraction
+5. Result: "No statements were generated from the answer"
+
+### Fix Implemented (Commit eff636a)
+
+**New Format (Lines 101-115)**:
+```python
+claims = []
+for row in limited_results:
+    for key, value in row.items():
+        if value is not None:
+            # Create a simple factual claim: "The {field} is {value}."
+            claims.append(f"The {key} is {value}.")
+formatted_results = " ".join(claims)
+```
+
+**Output Example**:
+```
+"The department is Engineering. The first_name is John. The last_name is Doe.
+ The department is Sales. The first_name is Jane. The last_name is Smith."
+```
+
+**Why This Works**:
+1. Each statement is a simple, declarative factual claim
+2. RAGAS can easily extract: "The department is Engineering"
+3. Claims are directly verifiable against context: `"Database record 1: department=Engineering"`
+4. Matches RAGAS faithfulness design pattern for claim extraction
+
+### Expected Results
+
+**Before Fix #4**:
+```json
+{
+  "faithfulness": 0.0,           // "No statements generated"
+  "answer_relevance": 0.86,      // ✅ Working
+  "context_utilization": 0.99    // ✅ Working
+}
+```
+
+**After Fix #4 (Expected)**:
+```json
+{
+  "faithfulness": 0.75-0.95,     // ✅ Claims extractable and verifiable
+  "answer_relevance": 0.86,      // ✅ Working
+  "context_utilization": 0.99    // ✅ Working
+}
+```
+
+### Deployment Status
+
+**Commit**: `eff636a`
+**Pushed**: October 5, 2025 23:10 UTC
+**Railway**: Auto-deploying (ETA: 23:13 UTC)
+
+### Verification Plan
+
+1. Wait 3 minutes for Railway deployment
+2. Run test query: "Show all employees in Engineering"
+3. Check `/api/query/{id}` for RAGAS scores
+4. Verify:
+   - ✅ No "No statements generated" error in logs
+   - ✅ Faithfulness > 0.7
+   - ✅ Answer relevance ~0.86
+   - ✅ Context utilization ~0.99
+
+---
+
+**Previous Status**: ✅ Context fix deployed (commit 894b9bf) - Context utilization now working
+**Current Status**: 🔄 Answer format fix deployed (commit eff636a) - Awaiting verification
 
