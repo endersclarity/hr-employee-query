@@ -60,6 +60,15 @@ SQL: SELECT * FROM employees WHERE department = 'Engineering' AND salary_usd > 1
 User: "List employees hired in the last 6 months"
 SQL: SELECT * FROM employees WHERE hire_date >= CURRENT_DATE - INTERVAL '6 months'
 
+User: "List all departments"
+SQL: SELECT DISTINCT department FROM employees ORDER BY department
+
+User: "How many employees are in each department?"
+SQL: SELECT department, COUNT(*) as employee_count FROM employees GROUP BY department ORDER BY department
+
+User: "What are the unique roles in Engineering?"
+SQL: SELECT DISTINCT role FROM employees WHERE department = 'Engineering' ORDER BY role
+
 User: "Who is on parental leave?"
 SQL: SELECT * FROM employees WHERE leave_type = 'Parental Leave'
 
