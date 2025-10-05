@@ -131,7 +131,7 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
         )
 
         # Extract scores from evaluation result
-        # Ragas returns a Result object with metrics as attributes
+        # Ragas returns a Result object - convert to pandas to extract scores
         # Handle NaN/Inf values (replace with 0.0 for JSON compliance)
         def sanitize_score(value, metric_name="unknown"):
             """Convert NaN/Inf to 0.0 with logging, ensure valid float."""
@@ -152,10 +152,14 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
                 logger.error("ragas_score_error", metric=metric_name, error=str(e))
                 return 0.0
 
+        # Convert Result object to pandas DataFrame to extract scores
+        result_df = evaluation_result.to_pandas()
+
+        # Extract first row scores (we only evaluated one sample)
         scores = {
-            'faithfulness': sanitize_score(evaluation_result.get('faithfulness', 0.0), 'faithfulness'),
-            'answer_relevance': sanitize_score(evaluation_result.get('answer_relevancy', 0.0), 'answer_relevance'),
-            'context_utilization': sanitize_score(evaluation_result.get('context_utilization', 0.0), 'context_utilization')
+            'faithfulness': sanitize_score(result_df['faithfulness'].iloc[0], 'faithfulness'),
+            'answer_relevance': sanitize_score(result_df['answer_relevancy'].iloc[0], 'answer_relevance'),
+            'context_utilization': sanitize_score(result_df['context_utilization'].iloc[0], 'context_utilization')
         }
 
         logger.info("ragas_evaluation_complete",
