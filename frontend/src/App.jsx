@@ -5,9 +5,11 @@ import ResultsTable from './components/ResultsTable';
 import ErrorDisplay from './components/ErrorDisplay';
 import LoadingSpinner from './components/LoadingSpinner';
 import RagasScoreDisplay from './components/RagasScoreDisplay';
+import RagasAnalysisDashboard from './components/RagasAnalysisDashboard';
 import { submitQuery } from './services/api';
 
 export default function App() {
+  const [currentPage, setCurrentPage] = useState('query'); // 'query' or 'analysis'
   const [results, setResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -55,48 +57,86 @@ export default function App() {
       </div>}
     >
       <div className="min-h-screen bg-zinc-950 flex flex-col items-center">
-        <div className="w-full max-w-3xl px-4 py-8">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-white mb-2">
-              HR Employee Query System
-            </h1>
-            <p className="text-zinc-400 text-sm">
-              Ask questions about employees in natural language
-            </p>
+        <div className="w-full max-w-6xl px-4 py-8">
+          {/* Navigation */}
+          <div className="flex justify-center mb-8">
+            <div className="bg-zinc-900 rounded-lg p-1 inline-flex border border-zinc-800">
+              <button
+                onClick={() => setCurrentPage('query')}
+                className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+                  currentPage === 'query'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                Query Interface
+              </button>
+              <button
+                onClick={() => setCurrentPage('analysis')}
+                className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+                  currentPage === 'analysis'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                RAGAS Analysis
+              </button>
+            </div>
           </div>
 
-          <QueryInterface
-            onSubmit={handleQuerySubmit}
-            isLoading={isLoading}
-            onTimeout={handleTimeout}
-            error={error}
-            results={results}
-          />
+          {/* Query Interface Page */}
+          {currentPage === 'query' && (
+            <div className="max-w-3xl mx-auto">
+              <div className="text-center mb-8">
+                <h1 className="text-3xl font-bold text-white mb-2">
+                  HR Employee Query System
+                </h1>
+                <p className="text-zinc-400 text-sm">
+                  Ask questions about employees in natural language
+                </p>
+              </div>
 
-          <div className="mt-8">
-            {isLoading && <LoadingSpinner />}
-            {!isLoading && !error && results.length > 0 && (
-              <>
-                {generatedSQL && (
-                  <div className="mb-4 bg-zinc-900 rounded-lg p-4">
-                    <button
-                      onClick={() => setShowSQL(!showSQL)}
-                      className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                    >
-                      {showSQL ? '▼' : '▶'} Generated SQL
-                    </button>
-                    {showSQL && (
-                      <pre className="mt-2 text-sm text-emerald-400 font-mono overflow-x-auto">
-                        {generatedSQL}
-                      </pre>
+              <QueryInterface
+                onSubmit={handleQuerySubmit}
+                isLoading={isLoading}
+                onTimeout={handleTimeout}
+                error={error}
+                results={results}
+              />
+
+              <div className="mt-8">
+                {isLoading && <LoadingSpinner />}
+                {!isLoading && !error && results.length > 0 && (
+                  <>
+                    {generatedSQL && (
+                      <div className="mb-4 bg-zinc-900 rounded-lg p-4">
+                        <button
+                          onClick={() => setShowSQL(!showSQL)}
+                          className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          {showSQL ? '▼' : '▶'} Generated SQL
+                        </button>
+                        {showSQL && (
+                          <pre className="mt-2 text-sm text-emerald-400 font-mono overflow-x-auto">
+                            {generatedSQL}
+                          </pre>
+                        )}
+                      </div>
                     )}
-                  </div>
+                    <ResultsTable results={results} />
+                    <RagasScoreDisplay scores={ragasScores} />
+                  </>
                 )}
-                <ResultsTable results={results} />
-                <RagasScoreDisplay scores={ragasScores} />
-              </>
-            )}
-          </div>
+              </div>
+            </div>
+          )}
+
+          {/* RAGAS Analysis Page */}
+          {currentPage === 'analysis' && (
+            <div className="max-w-6xl mx-auto">
+              <RagasAnalysisDashboard />
+            </div>
+          )}
         </div>
       </div>
     </ErrorBoundary>

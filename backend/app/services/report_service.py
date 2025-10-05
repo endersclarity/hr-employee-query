@@ -68,8 +68,11 @@ def get_analysis_report() -> Dict:
                         "reason": _identify_weakness_reason(scores)
                     })
 
-            # Generate actionable recommendations based on weak queries
-            recommendations = _generate_recommendations(weak_queries, logs)
+            # Categorize queries by type and calculate type-specific averages
+            query_type_analysis = _categorize_queries_by_type(logs)
+
+            # Generate actionable recommendations based on weak queries and patterns
+            recommendations = _generate_recommendations(weak_queries, logs, query_type_analysis)
 
             logger.info("analysis_report_generated",
                 total_queries=len(logs),
@@ -84,6 +87,7 @@ def get_analysis_report() -> Dict:
                     "answer_relevance": float(round(avg_answer_relevance, 2)),
                     "context_precision": float(round(avg_context_precision, 2))
                 },
+                "query_type_analysis": query_type_analysis,
                 "weak_queries": weak_queries[:10],  # Limit to top 10 for readability
                 "recommendations": recommendations
             }
@@ -94,6 +98,71 @@ def get_analysis_report() -> Dict:
     except Exception as e:
         logger.error("analysis_report_failed", error=str(e))
         raise
+
+
+def _categorize_queries_by_type(logs: List[QueryLog]) -> Dict:
+    """
+    Categorize queries by SQL pattern type and calculate type-specific averages.
+
+    Args:
+        logs: All query logs
+
+    Returns:
+        Dictionary with query counts and average scores per type
+    """
+    query_types = {
+        'simple_select': [],
+        'where_filter': [],
+        'date_range': [],
+        'aggregation': [],
+        'join': []
+    }
+
+    for log in logs:
+        if not log.generated_sql:
+            continue
+
+        sql_upper = log.generated_sql.upper()
+
+        # Categorize query type (priority order: most specific first)
+        if 'JOIN' in sql_upper:
+            query_types['join'].append(log)
+        elif any(kw in sql_upper for kw in ['DISTINCT', 'GROUP BY', 'COUNT(', 'SUM(', 'AVG(', 'MAX(', 'MIN(']):
+            query_types['aggregation'].append(log)
+        elif any(kw in sql_upper for kw in ['INTERVAL', 'DATE_SUB', 'DATE_ADD', 'DATE(']):
+            query_types['date_range'].append(log)
+        elif 'WHERE' in sql_upper:
+            query_types['where_filter'].append(log)
+        else:
+            query_types['simple_select'].append(log)
+
+    # Calculate averages per type
+    type_analysis = {}
+    for qtype, queries in query_types.items():
+        if not queries:
+            continue
+
+        # Filter queries with scores
+        queries_with_scores = [
+            q for q in queries
+            if q.faithfulness_score is not None
+        ]
+
+        if not queries_with_scores:
+            continue
+
+        avg_faithfulness = sum(float(q.faithfulness_score) for q in queries_with_scores) / len(queries_with_scores)
+        avg_answer_relevance = sum(float(q.answer_relevance_score or 0) for q in queries_with_scores) / len(queries_with_scores)
+        avg_context_precision = sum(float(q.context_precision_score or 0) for q in queries_with_scores) / len(queries_with_scores)
+
+        type_analysis[qtype] = {
+            'count': len(queries_with_scores),
+            'avg_faithfulness': float(round(avg_faithfulness, 3)),
+            'avg_answer_relevance': float(round(avg_answer_relevance, 3)),
+            'avg_context_precision': float(round(avg_context_precision, 3))
+        }
+
+    return type_analysis
 
 
 def _identify_weakness_reason(scores: Dict[str, float | None]) -> str:
@@ -128,13 +197,14 @@ def _identify_weakness_reason(scores: Dict[str, float | None]) -> str:
     return "Multiple quality concerns"
 
 
-def _generate_recommendations(weak_queries: List[Dict], all_logs: List[QueryLog]) -> List[str]:
+def _generate_recommendations(weak_queries: List[Dict], all_logs: List[QueryLog], query_type_analysis: Dict) -> List[str]:
     """
-    Generate actionable recommendations based on query patterns.
+    Generate actionable recommendations based on query patterns and type analysis.
 
     Args:
         weak_queries: List of queries with scores < 0.7
         all_logs: All query logs for pattern analysis
+        query_type_analysis: Query type categorization with averages
 
     Returns:
         List of recommendation strings
@@ -144,6 +214,25 @@ def _generate_recommendations(weak_queries: List[Dict], all_logs: List[QueryLog]
     if not weak_queries:
         recommendations.append("✅ All queries performing well (scores ≥ 0.7). Continue monitoring.")
         return recommendations
+
+    # Check query type performance
+    for qtype, analysis in query_type_analysis.items():
+        if analysis['avg_faithfulness'] < 0.80:
+            if qtype == 'aggregation':
+                recommendations.append(
+                    f"⚠️ Aggregation queries show low faithfulness ({analysis['avg_faithfulness']:.2f}). "
+                    f"Add more aggregation query examples (DISTINCT, GROUP BY, COUNT) to LLM prompt."
+                )
+            elif qtype == 'join':
+                recommendations.append(
+                    f"⚠️ JOIN queries show low faithfulness ({analysis['avg_faithfulness']:.2f}). "
+                    f"Add manager relationship JOIN examples to LLM prompt."
+                )
+            elif qtype == 'date_range':
+                recommendations.append(
+                    f"⚠️ Date range queries show low faithfulness ({analysis['avg_faithfulness']:.2f}). "
+                    f"Standardize INTERVAL syntax in LLM prompt examples."
+                )
 
     # Analyze common patterns in weak queries
     weak_query_texts = [q["query"].lower() for q in weak_queries]
