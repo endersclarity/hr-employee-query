@@ -83,6 +83,8 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
         or None if evaluation fails (graceful degradation)
     """
     try:
+        logger.info("ragas_evaluate_start", nl_query=nl_query, result_count=len(results))
+
         # Check if ragas is available
         if not RAGAS_AVAILABLE:
             logger.debug("ragas_evaluation_skipped", message="Ragas not available")
@@ -130,13 +132,21 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
             'contexts': [result_contexts]  # Actual database results for faithfulness validation
         }
 
+        logger.info("ragas_dataset_created",
+            question_len=len(nl_query),
+            answer_len=len(formatted_results),
+            context_count=len(result_contexts))
+
         dataset = Dataset.from_dict(dataset_dict)
+        logger.info("ragas_dataset_converted", dataset_size=len(dataset))
 
         # Evaluate using Ragas metrics
         # Ragas evaluate() is synchronous but conflicts with uvloop in FastAPI
         # Run in thread pool to avoid "Can't patch loop of type <class 'uvloop.Loop'>" error
         # Using context_utilization instead of context_precision (which requires ground_truth)
         loop = asyncio.get_event_loop()
+        logger.info("ragas_starting_evaluation", message="Calling ragas_evaluate()...")
+
         evaluation_result = await loop.run_in_executor(
             None,  # Use default ThreadPoolExecutor
             lambda: ragas_evaluate(
@@ -144,6 +154,8 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
                 metrics=[faithfulness, answer_relevancy, context_utilization]
             )
         )
+
+        logger.info("ragas_evaluation_returned", message="ragas_evaluate() completed")
 
         # Extract scores from evaluation result
         # Ragas returns a Result object - convert to pandas to extract scores
