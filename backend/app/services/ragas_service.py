@@ -88,9 +88,20 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
             logger.debug("ragas_evaluation_skipped", message="Ragas not available")
             return None
 
-        # Format results as answer string (what user receives)
+        # Format results as natural language text for RAGAS to parse
+        # RAGAS faithfulness needs human-readable statements, not Python dict strings
         # Limit to first 5 results to avoid token limits
-        formatted_results = str(results[:5]) if results else "No results returned"
+        if not results:
+            formatted_results = "No results returned from the database."
+        else:
+            # Convert results to natural language statements
+            result_statements = []
+            for i, row in enumerate(results[:5], 1):
+                # Format each row as a descriptive statement
+                row_parts = [f"{key}: {value}" for key, value in row.items()]
+                statement = f"Record {i}: " + ", ".join(row_parts)
+                result_statements.append(statement)
+            formatted_results = " ".join(result_statements)
 
         # Create Ragas dataset format
         # For NL→SQL evaluation:
