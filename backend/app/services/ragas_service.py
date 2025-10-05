@@ -184,7 +184,7 @@ async def evaluate_and_update_async(query_id: int, nl_query: str, sql: str, resu
         sql: Generated SQL query
         results: Query results as list of dicts
     """
-    from app.db.database import get_db_session
+    from app.db.session import get_db_session
     from app.db.models import QueryLog
 
     db = None
