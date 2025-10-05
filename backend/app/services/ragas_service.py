@@ -89,34 +89,30 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
             return None
 
         # Format results as natural language text for RAGAS to parse
-        # RAGAS faithfulness needs complete sentences with verbs, not just data listings
+        # RAGAS faithfulness extracts FACTUAL CLAIMS from the answer and verifies them against context
+        # Claims must be simple, declarative statements that can be verified
         # Limit to first 10 results to avoid token limits
         if not results:
             formatted_results = "No results were found in the database for this query."
         else:
-            # Convert to natural language sentences based on query type
             num_results = len(results)
             limited_results = results[:10]
 
-            # Create a natural language summary
-            if num_results == 1:
-                # Single result - describe the record
-                row = limited_results[0]
-                parts = [f"the {key} is {value}" for key, value in row.items() if value is not None]
-                formatted_results = f"The query returned one result where {', and '.join(parts)}."
-            else:
-                # Multiple results - list them in sentences
-                sentences = []
-                for row in limited_results:
-                    # Create a sentence describing this row
-                    parts = [f"{key} is {value}" for key, value in row.items() if value is not None]
-                    if parts:
-                        sentences.append("There is a record where " + ", ".join(parts) + ".")
+            # Extract factual claims from the data
+            # For each result row, create simple declarative statements about the data values
+            claims = []
+            for row in limited_results:
+                for key, value in row.items():
+                    if value is not None:
+                        # Create a simple factual claim: "The {field} is {value}."
+                        # This format is easily verifiable against the context
+                        claims.append(f"The {key} is {value}.")
 
-                if num_results > 10:
-                    formatted_results = " ".join(sentences) + f" There are {num_results - 10} additional records not shown."
-                else:
-                    formatted_results = " ".join(sentences)
+            # Combine all claims into the answer
+            if num_results > 10:
+                formatted_results = " ".join(claims) + f" There are {num_results - 10} additional records not shown."
+            else:
+                formatted_results = " ".join(claims)
 
         # Create Ragas dataset format
         # For text-to-SQL, contexts should be the RAW DATABASE RESULTS, not schema
