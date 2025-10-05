@@ -89,19 +89,34 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
             return None
 
         # Format results as natural language text for RAGAS to parse
-        # RAGAS faithfulness needs human-readable statements, not Python dict strings
-        # Limit to first 5 results to avoid token limits
+        # RAGAS faithfulness needs complete sentences with verbs, not just data listings
+        # Limit to first 10 results to avoid token limits
         if not results:
-            formatted_results = "No results returned from the database."
+            formatted_results = "No results were found in the database for this query."
         else:
-            # Convert results to natural language statements
-            result_statements = []
-            for i, row in enumerate(results[:5], 1):
-                # Format each row as a descriptive statement
-                row_parts = [f"{key}: {value}" for key, value in row.items()]
-                statement = f"Record {i}: " + ", ".join(row_parts)
-                result_statements.append(statement)
-            formatted_results = " ".join(result_statements)
+            # Convert to natural language sentences based on query type
+            num_results = len(results)
+            limited_results = results[:10]
+
+            # Create a natural language summary
+            if num_results == 1:
+                # Single result - describe the record
+                row = limited_results[0]
+                parts = [f"the {key} is {value}" for key, value in row.items() if value is not None]
+                formatted_results = f"The query returned one result where {', and '.join(parts)}."
+            else:
+                # Multiple results - list them in sentences
+                sentences = []
+                for row in limited_results:
+                    # Create a sentence describing this row
+                    parts = [f"{key} is {value}" for key, value in row.items() if value is not None]
+                    if parts:
+                        sentences.append("There is a record where " + ", ".join(parts) + ".")
+
+                if num_results > 10:
+                    formatted_results = " ".join(sentences) + f" There are {num_results - 10} additional records not shown."
+                else:
+                    formatted_results = " ".join(sentences)
 
         # Create Ragas dataset format
         # For NL→SQL evaluation:
