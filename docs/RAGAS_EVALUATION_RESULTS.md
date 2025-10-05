@@ -358,6 +358,120 @@ JOIN Queries        | 0.80-0.87           | 0.82-0.89
 
 ---
 
-**Status**: Fixes implemented, awaiting deployment and measurement
-**Last Updated**: October 5, 2025
-**Next Review**: After production deployment and score collection
+**Status**: 🔴 DEPLOYMENT FAILED - Production timeout issues, rollback required
+**Last Updated**: October 5, 2025, 20:55 UTC
+**Next Review**: After successful rollback and local testing
+
+---
+
+## 🔴 DEPLOYMENT INCIDENT SUMMARY
+
+### Timeline
+
+**20:48 UTC** - Deployed commit `494dc1a`
+- ✅ Schema context fix deployed
+- ✅ Comparative analysis working
+- ✅ Dashboard deployed
+- ❌ Faithfulness still 0.0 (RAGAS couldn't parse Python dict strings)
+- ✅ Queries working normally
+
+**20:50 UTC** - Deployed commit `be81f45`
+- Answer formatting changed to natural language
+- ❌ **PRODUCTION BROKEN** - Queries timeout
+- ❌ Simple queries like "list all departments" fail with timeout
+
+### Root Cause (Suspected)
+
+**Issue**: Answer formatting creates excessive string concatenation
+```python
+# Lines 99-104 in ragas_service.py
+for i, row in enumerate(results[:5], 1):
+    row_parts = [f"{key}: {value}" for key, value in row.items()]
+    statement = f"Record {i}: " + ", ".join(row_parts)
+    result_statements.append(statement)
+```
+
+**Impact**: RAGAS evaluation blocks query response, causing 10s timeout
+
+### What We Learned
+
+1. ✅ **Schema context is correct approach** - RAGAS needs database schema, not SQL
+2. ✅ **Enhanced logging works** - Caught "No statements generated" error
+3. ✅ **Comparative analysis ready** - Backend and frontend deployed successfully
+4. ❌ **Answer format critical** - Python dict strings don't work, but natural language caused timeouts
+5. ❌ **RAGAS evaluation blocks queries** - Need async/background processing
+
+### Current Production Status
+
+**Deployed Commit**: `be81f45` (BROKEN - timeout issues)
+**Last Stable Commit**: `d5a06f6` (before RAGAS fixes)
+**Recommended Action**: Rollback to `d5a06f6` immediately
+
+### Commits Available for Rollback
+
+| Commit | Date | Status | RAGAS Faithfulness | Query Performance |
+|--------|------|--------|-------------------|-------------------|
+| `d5a06f6` | Oct 3 | ✅ Stable | Not implemented | ✅ Fast |
+| `494dc1a` | Oct 5 | ⚠️ Partial | Returns 0.0 | ✅ Fast |
+| `be81f45` | Oct 5 | ❌ Broken | Unknown | ❌ Timeout |
+
+**Recommendation**: Rollback to `494dc1a` to preserve analysis dashboard while maintaining performance
+
+---
+
+## REVISED IMPLEMENTATION STRATEGY
+
+### Immediate Actions (After Rollback)
+
+1. **Rollback Production** to `d5a06f6` or `494dc1a`
+2. **Test Locally** before next deployment
+3. **Add RAGAS Timeout Protection**
+4. **Consider Async RAGAS Processing**
+
+### Local Testing Requirements (Before Next Deploy)
+
+```bash
+# Start local backend
+docker-compose up backend
+
+# Test query with RAGAS
+time curl -X POST http://localhost:8000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"List all departments"}'
+
+# Success criteria:
+# - Response time < 10 seconds
+# - Faithfulness score > 0.0
+# - No "No statements generated" error
+```
+
+### Alternative Solution: Async RAGAS Processing
+
+**Current (Synchronous - BLOCKS QUERIES)**:
+```python
+# Query Service
+results = execute_sql(sql)
+ragas_scores = await ragas_service.evaluate(...)  # ← BLOCKS HERE
+return QueryResponse(results, ragas_scores)
+```
+
+**Proposed (Asynchronous - NON-BLOCKING)**:
+```python
+# Query Service
+results = execute_sql(sql)
+# Return immediately, calculate RAGAS in background
+asyncio.create_task(evaluate_async(query_id, nl_query, sql, results))
+return QueryResponse(results, ragas_scores=None)
+
+# Background task updates query_logs table when done
+```
+
+**Benefits**:
+- Queries return immediately (no timeout risk)
+- RAGAS scores calculated in background
+- Can display scores after they're ready
+- No impact on query performance
+
+---
+
+**Status**: 🔴 FIXES IMPLEMENTED BUT CAUSED PRODUCTION ISSUES - Rollback required, local testing needed before retry

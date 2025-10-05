@@ -851,4 +851,132 @@ Recommendations:
 
 ---
 
-**Status**: ✅ RESOLVED - Deployed to production (awaiting verification)
+**Status**: 🔴 IN PROGRESS - Fix deployed but caused production timeout issues
+
+---
+
+## 🔴 DEPLOYMENT INCIDENT - October 5, 2025
+
+### Issue
+After deploying commit `be81f45`, production queries are timing out on simple requests like "list all departments".
+
+### Commits Deployed
+1. **Commit `494dc1a`** (20:48 UTC) - Initial RAGAS fixes
+   - Added EMPLOYEE_SCHEMA constant
+   - Updated evaluate() to use schema context
+   - Enhanced sanitize_score() logging
+   - Added comparative analysis engine
+   - Added RAGAS Analysis Dashboard
+   - Status: Deployed successfully, but faithfulness still returned 0.0
+
+2. **Commit `be81f45`** (20:50 UTC) - Answer formatting fix
+   - Changed answer format from `str(results)` to natural language statements
+   - Status: **DEPLOYED - CAUSED TIMEOUT ISSUES**
+
+### Root Cause Analysis (In Progress)
+
+**Symptom**: Simple queries timeout (e.g., "list all departments")
+
+**Suspected Cause**: Answer formatting in ragas_service.py line 99-104
+```python
+for i, row in enumerate(results[:5], 1):
+    row_parts = [f"{key}: {value}" for key, value in row.items()]
+    statement = f"Record {i}: " + ", ".join(row_parts)
+    result_statements.append(statement)
+formatted_results = " ".join(result_statements)
+```
+
+**Potential Issues**:
+1. Large result sets causing excessive string concatenation
+2. RAGAS evaluation taking too long (blocking query response)
+3. Memory issues with formatted_results string
+
+### Evidence from Logs (Before Timeout)
+
+**Deployment `ad32aaf7` (Commit `494dc1a`):**
+```
+"No statements were generated from the answer."
+"faithfulness returned NaN - check context format"
+```
+- Faithfulness returned NaN because answer was Python dict string
+- Our enhanced logging caught this issue
+- Answer relevance and context utilization worked fine
+
+**Deployment `be81f45` (Current - BROKEN):**
+- Queries timing out
+- Frontend shows "Request timed out"
+- Unknown if RAGAS evaluation is even running
+
+### Rollback Plan
+
+**Immediate Action Required**:
+1. Railway Dashboard → Deployments
+2. Find commit `d5a06f6` (last known stable - before all RAGAS fixes)
+3. Click "Redeploy"
+4. Estimated downtime: 2-3 minutes
+
+**Alternative**: Rollback to `494dc1a` (first RAGAS fix attempt)
+- Faithfulness won't work (still returns 0.0)
+- But queries won't timeout
+- Comparative analysis and dashboard will work
+
+### Current Status
+
+**Production**: 🔴 BROKEN (queries timeout)
+**Last Stable Commit**: `d5a06f6` (before RAGAS fixes)
+**Deployed Commit**: `be81f45` (timeout issues)
+
+**Recommended Action**: Rollback to `d5a06f6` immediately to restore service
+
+---
+
+## REVISED IMPLEMENTATION PLAN
+
+### What Worked ✅
+1. ✅ EMPLOYEE_SCHEMA constant created and deployed
+2. ✅ Schema context passed to RAGAS (instead of SQL)
+3. ✅ Enhanced sanitize_score() logging (caught the "No statements" error)
+4. ✅ Comparative analysis engine working
+5. ✅ RAGAS Analysis Dashboard deployed
+6. ✅ Test coverage written
+
+### What Didn't Work ❌
+1. ❌ **Faithfulness still returns 0.0** - RAGAS cannot parse Python dict strings
+2. ❌ **Answer formatting fix caused timeouts** - String concatenation or RAGAS blocking queries
+
+### Next Steps (After Rollback)
+
+**Phase 1: Fix Answer Formatting (Without Breaking Queries)**
+- Test answer formatting locally before deploying
+- Add timeout protection around RAGAS evaluation
+- Consider async/background processing for RAGAS
+
+**Phase 2: Optimize RAGAS Evaluation**
+- Move RAGAS evaluation to background task (celery/rq)
+- Return query results immediately
+- Calculate RAGAS scores asynchronously
+- Update query logs after evaluation completes
+
+**Phase 3: Test Locally First**
+```bash
+# Run local backend with Docker
+docker-compose up backend
+
+# Test RAGAS evaluation
+curl -X POST http://localhost:8000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"List all departments"}'
+
+# Verify response time < 10 seconds
+# Verify faithfulness score > 0.0
+```
+
+**Phase 4: Deploy with Monitoring**
+- Deploy to Railway
+- Monitor query response times
+- Check RAGAS scores immediately
+- Rollback if response time > 10s
+
+---
+
+**Status**: 🔴 PRODUCTION BROKEN - Rollback required to restore service
