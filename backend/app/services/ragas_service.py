@@ -119,15 +119,19 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
                     formatted_results = " ".join(sentences)
 
         # Create Ragas dataset format
-        # For NL→SQL evaluation:
-        # - question: the natural language query
-        # - answer: formatted results (what user sees)
-        # - contexts: the DATABASE SCHEMA (not SQL!) for faithfulness validation
-        # - ground_truth: not required for these metrics
+        # For text-to-SQL, contexts should be the RAW DATABASE RESULTS, not schema
+        # Faithfulness verifies the formatted answer matches the actual data retrieved
+        # Format raw results as simple factual statements for RAGAS to verify against
+        result_contexts = []
+        for i, row in enumerate(results[:10], 1):
+            # Simple JSON-like representation of each result
+            row_str = f"Database record {i}: " + ", ".join([f"{k}={v}" for k, v in row.items() if v is not None])
+            result_contexts.append(row_str)
+
         dataset_dict = {
             'question': [nl_query],
             'answer': [formatted_results],
-            'contexts': [[EMPLOYEE_SCHEMA]]  # Schema for faithfulness validation
+            'contexts': [result_contexts]  # Actual database results for faithfulness validation
         }
 
         dataset = Dataset.from_dict(dataset_dict)
