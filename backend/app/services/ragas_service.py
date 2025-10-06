@@ -156,9 +156,9 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
         logger.info("ragas_dataset_converted", dataset_size=len(dataset))
 
         # Evaluate using Ragas metrics
-        # Configure metrics with gpt-4o-nano for fastest evaluation
-        # gpt-4o-nano is the fastest OpenAI model (optimized for speed)
-        openai_llm = ChatOpenAI(model="gpt-4o-nano", temperature=0)
+        # Configure metrics with gpt-4.1-nano for fastest evaluation
+        # gpt-4.1-nano is OpenAI's fastest model (optimized for speed, low latency)
+        openai_llm = ChatOpenAI(model="gpt-4.1-nano", temperature=0)
         evaluator_llm = LangchainLLMWrapper(openai_llm)
 
         # Initialize metrics with fast LLM
@@ -169,7 +169,7 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
         # Ragas evaluate() is synchronous but conflicts with uvloop in FastAPI
         # Run in thread pool to avoid "Can't patch loop of type <class 'uvloop.Loop'>" error
         loop = asyncio.get_event_loop()
-        logger.info("ragas_starting_evaluation", message="Calling ragas_evaluate() with gpt-4o-nano...")
+        logger.info("ragas_starting_evaluation", message="Calling ragas_evaluate() with gpt-4.1-nano...")
 
         # Enhanced error handling to capture AssertionError and other exceptions
         try:
