@@ -35,10 +35,11 @@ def get_analysis_report() -> Dict:
                     "recommendations": ["No queries executed yet. Run some queries to generate recommendations."]
                 }
 
-            # Calculate average scores (excluding None values)
-            faithfulness_scores = [log.faithfulness_score for log in logs if log.faithfulness_score is not None]
-            answer_relevance_scores = [log.answer_relevance_score for log in logs if log.answer_relevance_score is not None]
-            context_precision_scores = [log.context_precision_score for log in logs if log.context_precision_score is not None]
+            # Calculate average scores (excluding None values and 0.0 from old broken queries)
+            # Filter out 0.0 scores which indicate old queries before Bug #002/#003 fixes
+            faithfulness_scores = [log.faithfulness_score for log in logs if log.faithfulness_score is not None and log.faithfulness_score > 0.0]
+            answer_relevance_scores = [log.answer_relevance_score for log in logs if log.answer_relevance_score is not None and log.answer_relevance_score > 0.0]
+            context_precision_scores = [log.context_precision_score for log in logs if log.context_precision_score is not None and log.context_precision_score > 0.0]
 
             avg_faithfulness = sum(faithfulness_scores) / len(faithfulness_scores) if faithfulness_scores else 0.0
             avg_answer_relevance = sum(answer_relevance_scores) / len(answer_relevance_scores) if answer_relevance_scores else 0.0
