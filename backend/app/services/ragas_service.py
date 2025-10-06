@@ -41,10 +41,11 @@ Constraints:
 # Import ragas dependencies with graceful fallback
 try:
     from ragas import evaluate as ragas_evaluate
-    from ragas.metrics import faithfulness, answer_relevancy, ContextUtilization
+    from ragas.metrics import Faithfulness, AnswerRelevancy, ContextUtilization
+    from ragas.llms import LangchainLLMWrapper
+    from langchain_openai import ChatOpenAI
     from datasets import Dataset
     RAGAS_AVAILABLE = True
-    context_utilization = ContextUtilization()  # Create instance for compatibility
 except ImportError:
     RAGAS_AVAILABLE = False
     logger.warning("ragas_not_installed", message="Ragas dependencies not available. Install with: pip install ragas langchain datasets")
@@ -155,11 +156,20 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
         logger.info("ragas_dataset_converted", dataset_size=len(dataset))
 
         # Evaluate using Ragas metrics
+        # Configure metrics with gpt-4o-mini for fast evaluation (3-5s per metric)
+        # Default RAGAS uses gpt-4 which is slower (10-30s per metric)
+        openai_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        evaluator_llm = LangchainLLMWrapper(openai_llm)
+
+        # Initialize metrics with fast LLM
+        faithfulness_metric = Faithfulness(llm=evaluator_llm)
+        answer_relevancy_metric = AnswerRelevancy(llm=evaluator_llm)
+        context_utilization_metric = ContextUtilization(llm=evaluator_llm)
+
         # Ragas evaluate() is synchronous but conflicts with uvloop in FastAPI
         # Run in thread pool to avoid "Can't patch loop of type <class 'uvloop.Loop'>" error
-        # Using context_utilization instead of context_precision (which requires ground_truth)
         loop = asyncio.get_event_loop()
-        logger.info("ragas_starting_evaluation", message="Calling ragas_evaluate()...")
+        logger.info("ragas_starting_evaluation", message="Calling ragas_evaluate() with gpt-4o-mini...")
 
         # Enhanced error handling to capture AssertionError and other exceptions
         try:
@@ -167,7 +177,7 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
                 None,  # Use default ThreadPoolExecutor
                 lambda: ragas_evaluate(
                     dataset=dataset,
-                    metrics=[faithfulness, answer_relevancy, context_utilization]
+                    metrics=[faithfulness_metric, answer_relevancy_metric, context_utilization_metric]
                 )
             )
             logger.info("ragas_evaluation_returned", message="ragas_evaluate() completed")
