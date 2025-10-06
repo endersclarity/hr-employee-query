@@ -274,7 +274,7 @@ async def evaluate_and_update_async(query_id: int, nl_query: str, sql: str, resu
         # Update database with scores
         query_log.faithfulness_score = scores['faithfulness']
         query_log.answer_relevance_score = scores['answer_relevance']
-        query_log.context_utilization_score = scores['context_utilization']
+        query_log.context_precision_score = scores['context_utilization']  # DB column is context_precision_score
         query_log.evaluation_status = 'completed'
         db.commit()
 
