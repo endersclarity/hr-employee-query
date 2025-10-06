@@ -67,8 +67,8 @@ export default function App() {
       }
     }, 2000); // Poll every 2 seconds
 
-    // Stop polling after 30 seconds
-    const timeout = setTimeout(() => clearInterval(pollInterval), 30000);
+    // Stop polling after 2 minutes (RAGAS can take 60-90 seconds)
+    const timeout = setTimeout(() => clearInterval(pollInterval), 120000);
 
     return () => {
       clearInterval(pollInterval);
