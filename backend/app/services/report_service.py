@@ -143,18 +143,21 @@ def _categorize_queries_by_type(logs: List[QueryLog]) -> Dict:
         if not queries:
             continue
 
-        # Filter queries with scores
+        # Filter queries with COMPLETE scores (exclude None and 0.0 from old broken queries)
+        # Must match the overall average calculation logic to prevent discrepancies
         queries_with_scores = [
             q for q in queries
-            if q.faithfulness_score is not None
+            if q.faithfulness_score is not None and q.faithfulness_score > 0.0
+            and q.answer_relevance_score is not None and q.answer_relevance_score > 0.0
+            and q.context_precision_score is not None and q.context_precision_score > 0.0
         ]
 
         if not queries_with_scores:
             continue
 
         avg_faithfulness = sum(float(q.faithfulness_score) for q in queries_with_scores) / len(queries_with_scores)
-        avg_answer_relevance = sum(float(q.answer_relevance_score or 0) for q in queries_with_scores) / len(queries_with_scores)
-        avg_context_precision = sum(float(q.context_precision_score or 0) for q in queries_with_scores) / len(queries_with_scores)
+        avg_answer_relevance = sum(float(q.answer_relevance_score) for q in queries_with_scores) / len(queries_with_scores)
+        avg_context_precision = sum(float(q.context_precision_score) for q in queries_with_scores) / len(queries_with_scores)
 
         type_analysis[qtype] = {
             'count': len(queries_with_scores),
