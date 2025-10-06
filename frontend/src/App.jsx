@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import QueryInterface from './components/QueryInterface';
 import ResultsTable from './components/ResultsTable';
@@ -6,7 +6,7 @@ import ErrorDisplay from './components/ErrorDisplay';
 import LoadingSpinner from './components/LoadingSpinner';
 import RagasScoreDisplay from './components/RagasScoreDisplay';
 import RagasAnalysisDashboard from './components/RagasAnalysisDashboard';
-import { submitQuery } from './services/api';
+import { submitQuery, fetchQueryStatus } from './services/api';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('query'); // 'query' or 'analysis'
@@ -16,18 +16,28 @@ export default function App() {
   const [generatedSQL, setGeneratedSQL] = useState(null);
   const [showSQL, setShowSQL] = useState(false);
   const [ragasScores, setRagasScores] = useState(null);
+  const [queryLogId, setQueryLogId] = useState(null);
+  const [evaluationStatus, setEvaluationStatus] = useState(null);
 
   const handleQuerySubmit = async (query) => {
     setIsLoading(true);
     setError(null);
     setGeneratedSQL(null);
     setRagasScores(null);
+    setQueryLogId(null);
+    setEvaluationStatus(null);
 
     try {
       const data = await submitQuery(query);
       setResults(data.results || []);
       setGeneratedSQL(data.sql || null);
-      setRagasScores(data.ragas_scores || null);
+      setQueryLogId(data.query_log_id);
+      setEvaluationStatus(data.evaluation_status);
+
+      // If scores are already available, set them
+      if (data.ragas_scores) {
+        setRagasScores(data.ragas_scores);
+      }
     } catch (err) {
       setError(err.message);
       setResults([]);
@@ -35,6 +45,36 @@ export default function App() {
       setIsLoading(false);
     }
   };
+
+  // Poll for RAGAS scores after query submission
+  useEffect(() => {
+    if (!queryLogId || evaluationStatus === 'completed') return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await fetchQueryStatus(queryLogId);
+        setEvaluationStatus(status.evaluation_status);
+
+        if (status.evaluation_status === 'completed' && status.ragas_scores) {
+          setRagasScores(status.ragas_scores);
+          clearInterval(pollInterval);
+        } else if (status.evaluation_status === 'failed') {
+          clearInterval(pollInterval);
+        }
+      } catch (err) {
+        console.error('Failed to poll RAGAS scores:', err);
+        clearInterval(pollInterval);
+      }
+    }, 2000); // Poll every 2 seconds
+
+    // Stop polling after 30 seconds
+    const timeout = setTimeout(() => clearInterval(pollInterval), 30000);
+
+    return () => {
+      clearInterval(pollInterval);
+      clearTimeout(timeout);
+    };
+  }, [queryLogId, evaluationStatus]);
 
   const handleTimeout = () => {
     setIsLoading(false);
@@ -124,7 +164,7 @@ export default function App() {
                       </div>
                     )}
                     <ResultsTable results={results} />
-                    <RagasScoreDisplay scores={ragasScores} />
+                    <RagasScoreDisplay scores={ragasScores} evaluationStatus={evaluationStatus} />
                   </>
                 )}
               </div>

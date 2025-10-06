@@ -41,6 +41,33 @@ export async function submitQuery(query) {
   }
 }
 
+export async function fetchQueryStatus(queryLogId) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/query/${queryLogId}`, {
+      method: 'GET',
+      headers: {'Content-Type': 'application/json'},
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('Request timed out. Please try again.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function fetchAnalysisReport() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), API_TIMEOUT);
