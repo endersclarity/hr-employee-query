@@ -1,6 +1,7 @@
 import os
 import asyncio
 import math
+import traceback
 import structlog
 from typing import Dict
 from concurrent.futures import ThreadPoolExecutor
@@ -40,9 +41,10 @@ Constraints:
 # Import ragas dependencies with graceful fallback
 try:
     from ragas import evaluate as ragas_evaluate
-    from ragas.metrics import faithfulness, answer_relevancy, context_utilization
+    from ragas.metrics import faithfulness, answer_relevancy, ContextUtilization
     from datasets import Dataset
     RAGAS_AVAILABLE = True
+    context_utilization = ContextUtilization()  # Create instance for compatibility
 except ImportError:
     RAGAS_AVAILABLE = False
     logger.warning("ragas_not_installed", message="Ragas dependencies not available. Install with: pip install ragas langchain datasets")
@@ -137,6 +139,14 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
             answer_len=len(formatted_results),
             context_count=len(result_contexts))
 
+        # DEBUG: Log actual data being passed to RAGAS for hypothesis verification
+        # This helps us verify Hypothesis #1 (format mismatch) and #2 (LLM config)
+        logger.debug("ragas_input_data",
+            answer_preview=formatted_results[:500] if formatted_results else "",
+            context_preview=[c[:200] for c in result_contexts[:3]] if result_contexts else [],
+            question=nl_query
+        )
+
         dataset = Dataset.from_dict(dataset_dict)
         logger.info("ragas_dataset_converted", dataset_size=len(dataset))
 
@@ -147,15 +157,29 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
         loop = asyncio.get_event_loop()
         logger.info("ragas_starting_evaluation", message="Calling ragas_evaluate()...")
 
-        evaluation_result = await loop.run_in_executor(
-            None,  # Use default ThreadPoolExecutor
-            lambda: ragas_evaluate(
-                dataset=dataset,
-                metrics=[faithfulness, answer_relevancy, context_utilization]
+        # Enhanced error handling to capture AssertionError and other exceptions
+        try:
+            evaluation_result = await loop.run_in_executor(
+                None,  # Use default ThreadPoolExecutor
+                lambda: ragas_evaluate(
+                    dataset=dataset,
+                    metrics=[faithfulness, answer_relevancy, context_utilization]
+                )
             )
-        )
-
-        logger.info("ragas_evaluation_returned", message="ragas_evaluate() completed")
+            logger.info("ragas_evaluation_returned", message="ragas_evaluate() completed")
+        except AssertionError as e:
+            logger.error("ragas_assertion_error",
+                error=str(e),
+                error_type="AssertionError",
+                message="RAGAS metric configuration issue - likely missing LLM setup",
+                traceback_preview=traceback.format_exc()[:1000])
+            return None
+        except Exception as e:
+            logger.error("ragas_evaluation_exception",
+                error=str(e),
+                error_type=type(e).__name__,
+                traceback_preview=traceback.format_exc()[:1000])
+            return None
 
         # Extract scores from evaluation result
         # Ragas returns a Result object - convert to pandas to extract scores
