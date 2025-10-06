@@ -100,7 +100,7 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
             formatted_results = "No results were found in the database for this query."
         else:
             num_results = len(results)
-            limited_results = results[:10]
+            limited_results = results[:3]  # Reduced from 10 to prevent timeout (Bug #002)
 
             # Extract factual claims from the data
             # For each result row, create simple declarative statements about the data values
@@ -113,8 +113,8 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
                         claims.append(f"The {key} is {value}.")
 
             # Combine all claims into the answer
-            if num_results > 10:
-                formatted_results = " ".join(claims) + f" There are {num_results - 10} additional records not shown."
+            if num_results > 3:
+                formatted_results = " ".join(claims) + f" There are {num_results - 3} additional records not shown."
             else:
                 formatted_results = " ".join(claims)
 
@@ -123,7 +123,7 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
         # Faithfulness verifies the formatted answer matches the actual data retrieved
         # Format raw results as simple factual statements for RAGAS to verify against
         result_contexts = []
-        for i, row in enumerate(results[:10], 1):
+        for i, row in enumerate(results[:3], 1):  # Match answer limit (Bug #002)
             # Simple JSON-like representation of each result
             row_str = f"Database record {i}: " + ", ".join([f"{k}={v}" for k, v in row.items() if v is not None])
             result_contexts.append(row_str)
@@ -134,10 +134,14 @@ async def evaluate(nl_query: str, sql: str, results: list) -> Dict[str, float] |
             'contexts': [result_contexts]  # Actual database results for faithfulness validation
         }
 
+        # Log claim count for timeout monitoring (Bug #002)
+        claim_count = len(claims) if results else 0
         logger.info("ragas_dataset_created",
             question_len=len(nl_query),
             answer_len=len(formatted_results),
-            context_count=len(result_contexts))
+            context_count=len(result_contexts),
+            claim_count=claim_count,
+            records_sampled=len(limited_results) if results else 0)
 
         # DEBUG: Log actual data being passed to RAGAS for hypothesis verification
         # This helps us verify Hypothesis #1 (format mismatch) and #2 (LLM config)
